@@ -1,0 +1,5 @@
+Write a 500 word essay on the importance of AI ethics.
+Requirements:
+- Must mention algorithmic bias.
+- Must cite at least one source.
+- Tone should be academic.
