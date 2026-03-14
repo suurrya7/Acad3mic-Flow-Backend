@@ -23,8 +23,8 @@ class TierAllocation:
     }
 
     GRADING_LIMITS = {
-        SubscriptionTier.FREE: 0,
-        SubscriptionTier.BASIC: 5,
+        SubscriptionTier.FREE: 2,
+        SubscriptionTier.BASIC: 7,
         SubscriptionTier.STANDARD: 15,
         SubscriptionTier.PREMIUM: 40,
         SubscriptionTier.ULTIMATE: 100

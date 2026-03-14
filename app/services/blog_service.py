@@ -59,8 +59,11 @@ class BlogService:
             return inserted_topics
 
         except Exception as e:
-            logger.error(f"Failed to generate blog topics: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to generate AI topics")
+            logger.error(f"Failed to generate blog topics: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=500, 
+                detail=f"AI Generation Failed: {str(e)}"
+            )
 
     async def suggest_topic(self, title: str) -> Dict:
         """Admin manually suggests a topic to be written immediately"""
