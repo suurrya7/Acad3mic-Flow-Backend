@@ -11,22 +11,23 @@ import {
     CircularProgress,
 } from '@mui/material';
 import { httpClient } from '../../dataProvider';
-import { useNotify } from 'react-admin';
+import { useNotify, useRecordContext } from 'react-admin';
 
-export const PromptEditor = ({ promptId }: { promptId?: string }) => {
+export const PromptEditor = ({ promptId: initialPromptId }: { promptId?: string }) => {
     const [promptText, setPromptText] = useState('');
     const [notes, setNotes] = useState('');
     const [testInput, setTestInput] = useState('');
     const [testOutput, setTestOutput] = useState('');
     const [testing, setTesting] = useState(false);
     const notify = useNotify();
+    const record = useRecordContext();
+    
+    const promptId = initialPromptId || record?.id;
 
     useEffect(() => {
         if (promptId) {
             // Load existing prompt
             const fetchPrompt = async () => {
-                const auth = localStorage.getItem('auth');
-                const session = JSON.parse(auth || '{}');
                 const { data } = await httpClient.get(`/admin/prompts/${promptId}`);
                 setPromptText(data.prompt_text);
                 setNotes(data.notes || '');
@@ -38,8 +39,6 @@ export const PromptEditor = ({ promptId }: { promptId?: string }) => {
     const handleTest = async () => {
         setTesting(true);
         try {
-            const auth = localStorage.getItem('auth');
-            const session = JSON.parse(auth || '{}');
             const { data } = await httpClient.post('/admin/prompts/test', {
                 prompt_text: promptText,
                 sample_text: testInput
@@ -54,8 +53,6 @@ export const PromptEditor = ({ promptId }: { promptId?: string }) => {
 
     const handleSave = async () => {
         try {
-            const auth = localStorage.getItem('auth');
-            const session = JSON.parse(auth || '{}');
             await httpClient.post('/admin/prompts', {
                 prompt_text: promptText,
                 notes

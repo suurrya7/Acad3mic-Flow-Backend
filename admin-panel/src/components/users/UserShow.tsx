@@ -28,7 +28,7 @@ const CreditAdjustButton = () => {
             const auth = localStorage.getItem('auth');
             const session = JSON.parse(auth || '{}');
             await axios.post(
-                `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/admin/users/${record.id}/credits`,
+                `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/admin/users/${record.id}/credits`,
                 { amount: parseInt(amount.toString() || '0', 10), reason: reason || 'Manual Admin Adjustment' },
                 {
                     headers: { Authorization: `Bearer ${session.access_token}` },

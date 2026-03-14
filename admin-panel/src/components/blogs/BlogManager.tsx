@@ -215,7 +215,7 @@ export const BlogManager = () => {
                                             <IconButton
                                                 size="small"
                                                 component="a"
-                                                href={`http://localhost:3001/blog/${post.slug}`}
+                                                href={`${import.meta.env.VITE_FRONTEND_URL || ''}/blog/${post.slug}`}
                                                 target="_blank"
                                             >
                                                 <LaunchIcon fontSize="small" />

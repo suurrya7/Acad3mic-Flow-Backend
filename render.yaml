@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: acad3micflow-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL_NAME
+        value: "models/gemini-2.0-flash-lite-preview"
+      - key: PAYU_MERCHANT_KEY
+        sync: false
+      - key: PAYU_SALT
+        sync: false
+      - key: PROD_ORIGINS
+        sync: false # Mention Vercel URL here
+      - key: API_BASE_URL
+        sync: false # Render URL
+      - key: FRONTEND_URL
+        sync: false # Vercel URL

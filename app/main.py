@@ -58,7 +58,17 @@ app.add_middleware(
 
 # Trusted host middleware for production
 if settings.ENV == "production":
-    allowed_hosts = [origin.replace("https://", "").replace("http://", "") for origin in origins]
+    # Base allowed hosts from CORS origins
+    allowed_hosts = [origin.replace("https://", "").replace("http://", "").split(":")[0] for origin in origins]
+    
+    # Add common cloud and local hosts to prevent lockout
+    allowed_hosts.extend([
+        "localhost",
+        "127.0.0.1",
+        ".onrender.com",  # Allows all subdomains on Render
+        "*.onrender.com"
+    ])
+    
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 # Request logging middleware for debugging

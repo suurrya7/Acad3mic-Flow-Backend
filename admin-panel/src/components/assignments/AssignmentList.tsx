@@ -9,12 +9,14 @@ import {
 } from 'react-admin';
 import { BulkDownloadAction } from './BulkDownloadAction';
 
-const AssignmentFilters = [
-    <NumberInput source="min_score" label="Min Score (>=)" alwaysOn />
-];
+const AssignmentFilters = (props: any) => (
+    <Filter {...props}>
+        <NumberInput source="min_score" label="Min Score (>=)" alwaysOn />
+    </Filter>
+);
 
 export const AssignmentList = () => (
-    <List filters={AssignmentFilters}>
+    <List filters={<AssignmentFilters />}>
         <Datagrid bulkActionButtons={<BulkDownloadAction />}>
             <TextField source="user_profiles.email" label="User Email" />
             <TextField source="title" />
