@@ -18,7 +18,8 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL_NAME
-        value: "models/gemini-2.0-flash-lite-preview"
+        sync: false
+        value: "models/gemini-3.1-flash-lite-preview"
       - key: PAYU_MERCHANT_KEY
         sync: false
       - key: PAYU_SALT

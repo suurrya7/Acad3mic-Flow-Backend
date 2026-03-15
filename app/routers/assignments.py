@@ -87,10 +87,19 @@ async def process_assignment_task(assignment_id: str, user_id: str, topic: str, 
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
+        # Log to server logs with full traceback
         logger.error(f"Assignment failure for {assignment_id}: {str(e)}\n{error_details}")
+        
+        # Determine a user-friendly but detailed error message
+        friendly_error = str(e)
+        if "404" in friendly_error:
+            friendly_error = f"AI Model Configuration Error: {friendly_error}. Check GEMINI_MODEL_NAME environment variable."
+        elif "quota" in friendly_error.lower():
+            friendly_error = "AI Quota Exceeded. Please try again later."
+            
         supabase.table("assignments").update({
             "status": "failed",
-            "error_message": str(e)
+            "error_message": friendly_error
         }).eq("id", assignment_id).execute()
 
 @router.post("/submit", response_model=AssignmentResponse, status_code=202)
