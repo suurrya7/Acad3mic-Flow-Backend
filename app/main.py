@@ -118,8 +118,18 @@ async def add_correlation_id(request: Request, call_next):
     return response
 
 # Exception Handler for generic error masking
+from fastapi import HTTPException
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    # If it's an HTTPException, let it through so we see the actual detail
+    if isinstance(exc, (HTTPException, StarletteHTTPException)):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail}
+        )
+    
     # Log the real error (sanitized by our logger)
     logger.error(f"Global Exception: {str(exc)}")
     return JSONResponse(
