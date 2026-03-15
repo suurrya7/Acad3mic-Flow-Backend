@@ -28,17 +28,17 @@ async def create_payu_order(
     
     # 2. Validate payment amount (strict validation for security)
     VALID_PLANS = {
-        699: TierAllocation.WORD_LIMITS[SubscriptionTier.BASIC],
-        1499: TierAllocation.WORD_LIMITS[SubscriptionTier.STANDARD],
-        2999: TierAllocation.WORD_LIMITS[SubscriptionTier.PREMIUM],
-        5999: TierAllocation.WORD_LIMITS[SubscriptionTier.ULTIMATE]
+        9.99: TierAllocation.WORD_LIMITS[SubscriptionTier.BASIC],
+        19.99: TierAllocation.WORD_LIMITS[SubscriptionTier.STANDARD],
+        39.99: TierAllocation.WORD_LIMITS[SubscriptionTier.PREMIUM],
+        79.99: TierAllocation.WORD_LIMITS[SubscriptionTier.ULTIMATE]
     }
     
     amount = float(request.amount)
     if amount not in VALID_PLANS:
         raise HTTPException(
             status_code=400,
-            detail="Invalid plan amount. Valid amounts: 699, 1499, 2999"
+            detail=f"Invalid plan amount {amount}. Valid amounts: {list(VALID_PLANS.keys())}"
         )
     
     words_to_add = VALID_PLANS[amount]
@@ -56,7 +56,7 @@ async def create_payu_order(
     # 4. Generate Hash
     hash_data = {
         "txnid": txnid,
-        "amount": str(int(amount)),
+        "amount": str(amount),
         "productinfo": request.productinfo,
         "firstname": request.firstname,
         "email": request.email
