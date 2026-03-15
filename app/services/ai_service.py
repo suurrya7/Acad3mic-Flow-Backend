@@ -13,8 +13,9 @@ settings = get_settings()
 INTERNAL_MODEL_NAME = settings.GEMINI_MODEL_NAME
 
 try:
-    # Use REST transport consistently for better timeout handling and to avoid gRPC deadline issues
-    genai.configure(api_key=settings.GEMINI_API_KEY, transport='rest')
+    # Use default transport (gRPC) which is more robust for streaming
+    # unless REST is explicitly needed.
+    genai.configure(api_key=settings.GEMINI_API_KEY)
 except Exception as e:
     logger.error(f"Failed to configure AI provider: {str(e)}")
 
@@ -588,10 +589,17 @@ class AIService:
                         except Exception as put_err:
                             logger.warning(f"Failed to put chunk in queue: {put_err}")
                 except Exception as e:
-                    logger.error(f"Streaming chat failed in thread: {str(e)}")
+                    error_str = str(e)
+                    logger.error(f"Streaming chat failed in thread: {error_str}")
+                    
+                    # Try to extract more detail if it's a 400 error
+                    final_msg = f"Stream error: {error_str}"
+                    if "400" in error_str:
+                        final_msg += " (This usually means the prompt was blocked or the model name is incorrect for streaming)"
+                        
                     try:
                         asyncio.run_coroutine_threadsafe(
-                            chunk_queue.put(Exception(f"Stream error: {str(e)}")),
+                            chunk_queue.put(Exception(final_msg)),
                             loop
                         ).result(timeout=5)
                     except Exception:

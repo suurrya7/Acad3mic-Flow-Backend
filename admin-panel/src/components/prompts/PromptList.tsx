@@ -10,25 +10,18 @@ import {
     useRefresh,
     useNotify,
 } from 'react-admin';
-import axios from 'axios';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import { httpClient } from '../../dataProvider';
 
 const ActivateButton = () => {
     const record = useRecordContext();
     const refresh = useRefresh();
     const notify = useNotify();
 
-    const handleActivate = async () => {
+    const handleActivate = async (e: React.MouseEvent) => {
+        e.stopPropagation(); // Prevent datagrid row click
         try {
-            const auth = localStorage.getItem('auth');
-            const session = JSON.parse(auth || '{}');
-            await axios.post(
-                `${import.meta.env.VITE_API_URL}/admin/prompts/${record.id}/activate`,
-                {},
-                {
-                    headers: { Authorization: `Bearer ${session.access_token}` },
-                }
-            );
+            await httpClient.post(`/admin/prompts/${record.id}/activate`);
             notify('Prompt activated successfully');
             refresh();
         } catch (error) {
