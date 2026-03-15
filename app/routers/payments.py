@@ -43,20 +43,23 @@ async def create_payu_order(
     
     words_to_add = VALID_PLANS[amount]
     
-    # 3. Create Transaction Record (Pending)
+    # 3. Convert Amount to INR
+    inr_amount = round(amount * settings.USD_TO_INR, 2)
+    
+    # 4. Create Transaction Record (Pending)
     data = {
         "user_id": user_id,
-        "amount": amount,
+        "amount": inr_amount, # Store the actual INR amount being charged
         "words_purchased": words_to_add,
         "status": "pending",
         "provider_ref": txnid
     }
     supabase.table("transactions").insert(data).execute()
     
-    # 4. Generate Hash
+    # 5. Generate Hash
     hash_data = {
         "txnid": txnid,
-        "amount": str(amount),
+        "amount": str(inr_amount),
         "productinfo": request.productinfo,
         "firstname": request.firstname,
         "email": request.email
@@ -64,16 +67,16 @@ async def create_payu_order(
     
     payment_hash = payment_service.generate_hash(hash_data)
     
-    # 5. Return params for frontend form submission
+    # 6. Return params for frontend form submission
     return {
         "txnid": txnid,
         "hash": payment_hash,
-        "amount": request.amount,
+        "amount": str(inr_amount),
         "productinfo": request.productinfo,
         "firstname": request.firstname,
         "email": request.email,
         "key": settings.PAYU_MERCHANT_KEY,
-        "surl": f"{settings.API_BASE_URL}/payments/payu/webhook",  # Dynamic webhook URL
+        "surl": f"{settings.API_BASE_URL}/payments/payu/webhook",
         "furl": f"{settings.API_BASE_URL}/payments/payu/webhook"
     }
 
@@ -122,8 +125,8 @@ async def payu_webhook(request: Request):
         # 4. Credit Words to User — use atomic RPC to prevent race conditions
         try:
             supabase.rpc("add_user_words", {
-                "user_uuid": user_id,
-                "words_to_add": words_to_add
+                "user_id_uuid": user_id,
+                "amount": words_to_add
             }).execute()
         except Exception as e:
             # Fallback: non-atomic update (better than losing the credit)

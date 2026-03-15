@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str
     GEMINI_MODEL_NAME: str = "models/gemini-3.1-flash-lite-preview"
     
+    # Payment Conversion
+    USD_TO_INR: float = 85.0 # Conversion rate for PayU
+    
     PAYU_MERCHANT_KEY: str
     PAYU_SALT: str
     
