@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     SUPABASE_JWT_SECRET: str
     
     GEMINI_API_KEY: str
-    GEMINI_MODEL_NAME: str = "models/gemini-2.0-flash-lite-preview"
+    GEMINI_MODEL_NAME: str = "models/gemini-3.1-flash-lite-preview"
     
     PAYU_MERCHANT_KEY: str
     PAYU_SALT: str

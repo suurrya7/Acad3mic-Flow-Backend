@@ -20,7 +20,9 @@ except Exception as e:
 
 class AIService:
     def __init__(self):
-        self.model = genai.GenerativeModel(INTERNAL_MODEL_NAME)
+        # Always get fresh settings to ensure we pick up environment overrides
+        current_settings = get_settings()
+        self.model = genai.GenerativeModel(current_settings.GEMINI_MODEL_NAME)
 
     def extract_json_from_text(self, text: str) -> str:
         """
