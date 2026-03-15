@@ -274,10 +274,10 @@ class AdminService:
             
             # Log action
             self.supabase.rpc('log_admin_action', {
-                'admin_uuid': admin_id,
+                'admin_uuid': str(admin_id),
                 'action_name': 'update_user',
                 'target_type_val': 'user',
-                'target_id_val': user_id,
+                'target_id_val': str(user_id),
                 'details_val': updates
             }).execute()
             
