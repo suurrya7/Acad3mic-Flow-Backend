@@ -1,5 +1,5 @@
 -- ACAD3MIC FLOW - MASTER DATABASE FIX (PRODUCTION RECOVERY)
--- v3: Extremely robust drops to handle function overloading errors.
+-- v4: Fixes target_id type mismatch (UUID vs TEXT) and improves robustness.
 
 -- 1. Create missing Humanizer Prompts table
 CREATE TABLE IF NOT EXISTS public.humanizer_prompts (
@@ -12,11 +12,34 @@ CREATE TABLE IF NOT EXISTS public.humanizer_prompts (
     notes TEXT
 );
 
--- 2. Create/Update Admin Action Logging RPC
--- Using a DO block to drop ANY function named log_admin_action regardless of arguments
+-- 2. Robust Drop/Recreate for admin_logs to handle type changes
 DO $$ 
 BEGIN
-    -- This handles any number of arguments or variations
+    -- If the table exists but has target_id as UUID, we drop it to reset to TEXT
+    IF EXISTS (
+        SELECT 1 
+        FROM information_schema.columns 
+        WHERE table_name = 'admin_logs' 
+        AND column_name = 'target_id' 
+        AND data_type = 'uuid'
+    ) THEN
+        DROP TABLE public.admin_logs CASCADE;
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.admin_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    admin_id UUID REFERENCES auth.users(id),
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT, -- Reset to TEXT for maximum flexibility
+    details JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 3. Create/Update Admin Action Logging RPC
+DO $$ 
+BEGIN
     EXECUTE (
         SELECT 'DROP FUNCTION ' || string_agg(oid::regprocedure::text, '; DROP FUNCTION ')
         FROM pg_proc
@@ -24,7 +47,6 @@ BEGIN
         AND pronamespace = 'public'::regnamespace
     );
 EXCEPTION WHEN OTHERS THEN 
-    -- If no functions found, just continue
 END $$;
 
 CREATE OR REPLACE FUNCTION public.log_admin_action(
@@ -36,23 +58,12 @@ CREATE OR REPLACE FUNCTION public.log_admin_action(
 )
 RETURNS VOID AS $$
 BEGIN
-    -- Ensure admin_logs table exists
-    CREATE TABLE IF NOT EXISTS public.admin_logs (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        admin_id UUID REFERENCES auth.users(id),
-        action TEXT NOT NULL,
-        target_type TEXT,
-        target_id TEXT,
-        details JSONB,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
-
     INSERT INTO public.admin_logs (admin_id, action, target_type, target_id, details)
     VALUES (admin_uuid, action_name, target_type_val, target_id_val, details_val);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 3. Create/Update Dashboard Statistics RPC
+-- 4. Create/Update Dashboard Statistics RPC
 DROP FUNCTION IF EXISTS public.get_dashboard_stats();
 CREATE OR REPLACE FUNCTION public.get_dashboard_stats()
 RETURNS JSONB AS $$
@@ -82,8 +93,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 4. Create atomic balance adjustment RPCs
--- Precision drops for credit functions
+-- 5. Create atomic balance adjustment RPCs
 DROP FUNCTION IF EXISTS public.deduct_user_words(UUID, INTEGER);
 DROP FUNCTION IF EXISTS public.add_user_words(UUID, INTEGER);
 DROP FUNCTION IF EXISTS public.deduct_grading_check(UUID);
@@ -115,14 +125,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 5. Grant permissions
+-- 6. Grant permissions
 GRANT EXECUTE ON FUNCTION get_dashboard_stats TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION log_admin_action TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION deduct_user_words TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION add_user_words TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION deduct_grading_check TO authenticated, service_role;
 
--- 6. Ensure Blog tables exist
+-- 7. Ensure Blog tables exist
 CREATE TABLE IF NOT EXISTS public.blog_topics (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     title TEXT NOT NULL,

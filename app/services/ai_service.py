@@ -125,10 +125,16 @@ class AIService:
             
         except Exception as e:
             # Final fallback to ensure consistent error message
-            error_msg = str(e).lower()
-            if "capacity limits" in error_msg or "too long" in error_msg or "quota" in error_msg:
+            error_msg = str(e)
+            error_msg_lower = error_msg.lower()
+            
+            # Pass through specific known errors
+            if any(key in error_msg_lower for key in ["capacity", "too long", "quota", "safety", "blocked"]):
                 raise e
-            raise Exception("AI processing failed. Please try again.")
+            
+            # For other errors, include the context so we can debug on Render
+            logger.error(f"AI Service Internal Error: {error_msg}")
+            raise Exception(f"AI processing failed: {error_msg}")
 
 
     async def humanize_text(self, text: str) -> str:
