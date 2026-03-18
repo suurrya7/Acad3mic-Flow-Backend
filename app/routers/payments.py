@@ -76,10 +76,10 @@ async def create_payu_order(
         "firstname": request.firstname,
         "email": request.email,
         "key": settings.PAYU_MERCHANT_KEY,
-        # surl: backend webhook to verify hash and credit words
+        # PayU POSTs to BOTH surl and furl — the frontend cannot handle POST requests.
+        # Both must go to the backend webhook, which then redirects to the frontend.
         "surl": f"{settings.API_BASE_URL}/payments/payu/webhook",
-        # furl: cancelled/failed payments go directly to frontend profile page — never expose Render URL
-        "furl": f"{settings.FRONTEND_URL}/profile?payment=cancelled"
+        "furl": f"{settings.API_BASE_URL}/payments/payu/webhook"
     }
 
 @router.post("/payu/webhook")
