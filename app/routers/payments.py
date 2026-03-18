@@ -78,8 +78,9 @@ async def create_payu_order(
         "key": settings.PAYU_MERCHANT_KEY,
         # PayU POSTs to BOTH surl and furl — the frontend cannot handle POST requests.
         # Both must go to the backend webhook, which then redirects to the frontend.
-        "surl": f"{settings.API_BASE_URL}/payments/payu/webhook",
-        "furl": f"{settings.API_BASE_URL}/payments/payu/webhook"
+        # Strip trailing slash to avoid double-slash 404s (e.g. if env var is set with trailing /)
+        "surl": f"{settings.API_BASE_URL.rstrip('/')}/payments/payu/webhook",
+        "furl": f"{settings.API_BASE_URL.rstrip('/')}/payments/payu/webhook"
     }
 
 @router.post("/payu/webhook")
@@ -99,8 +100,10 @@ async def payu_webhook(request: Request):
     txnid = data.get("txnid")
     
     # Redirect destinations (never expose raw Render URL to user)
-    success_url = f"{settings.FRONTEND_URL}/profile?payment=success"
-    failure_url = f"{settings.FRONTEND_URL}/profile?payment=failed"
+    _frontend = settings.FRONTEND_URL.rstrip('/')
+    success_url = f"{_frontend}/profile?payment=success"
+    failure_url = f"{_frontend}/profile?payment=failed"
+
     
     if not txnid:
         return RedirectResponse(url=failure_url, status_code=303)
