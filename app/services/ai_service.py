@@ -250,7 +250,7 @@ class AIService:
         strategy = await self.generate_content(user_prompt, system_instruction=system_prompt, timeout=300)
         return strategy
 
-    async def generate_assignment(self, topic: str, instructions: str, files_content: str = "", researched_data: str = "") -> str:
+    async def generate_assignment(self, topic: str, instructions: str, files_content: str = "", researched_data: str = "", assignment_id: str = None) -> str:
         """
         Generates the initial academic content before humanization.
         Uses a chunk-based strategy to enforce accurate word counts and instruction adherence.
@@ -359,14 +359,43 @@ class AIService:
             if researched_data:
                 chunk_user_prompt += f"\n\nExtracted Online Research Data:\n{researched_data}"
                 
-            # Generate the specific section
+            # Generate the specific section (with checkpoint support)
             try:
+                # --- If assignment_id provided, check if chunk already exists (resumption) ---
+                if assignment_id:
+                    from app.db.supabase import get_supabase_admin
+                    supabase = get_supabase_admin()
+                    existing = supabase.table("assignment_chunks") \
+                        .select("content") \
+                        .eq("assignment_id", assignment_id) \
+                        .eq("chunk_index", index) \
+                        .execute()
+                    if existing.data:
+                        logger.info(f"Resuming: chunk {index} ('{heading}') already exists.")
+                        full_academic_text += f"\n\n# {heading}\n\n{existing.data[0]['content']}"
+                        continue  # Skip AI call for this section
+
                 section_text = await self.generate_content(
                     chunk_user_prompt, 
                     system_instruction=chunk_system_prompt, 
                     timeout=120
                 )
                 
+                # --- Checkpoint: save section to DB immediately ---
+                if assignment_id:
+                    try:
+                        supabase.table("assignment_chunks").upsert({
+                            "assignment_id": assignment_id,
+                            "chunk_index": index,
+                            "heading": heading,
+                            "content": section_text.strip(),
+                            "target_words": target_words,
+                            "is_humanized": False
+                        }, on_conflict="assignment_id,chunk_index").execute()
+                        logger.info(f"Checkpointed chunk {index} ('{heading}') for assignment {assignment_id}")
+                    except Exception as db_err:
+                        logger.warning(f"Failed to checkpoint chunk {index}: {str(db_err)}")
+
                 # Append to full document
                 full_academic_text += f"\n\n# {heading}\n\n{section_text.strip()}"
                 
@@ -712,33 +741,76 @@ class AIService:
 
     async def perform_web_research(self, missing_item: str, context: str = "") -> str:
         """
-        Simulates/Performs web research for a missing item.
-        In a production environment, this would integrate with a Search API (Serper, Google Search, etc.)
-        For now, we use the LLM's grounding capabilities/prior knowledge to fetch external context.
+        Performs live web research using Serper.dev API.
+        Falls back to LLM internal knowledge if no API key is configured.
         """
+        import aiohttp
+        import json
+
+        serper_api_key = getattr(settings, 'SERPER_API_KEY', None)
+
+        # --- Live Search Path (Serper.dev) ---
+        if serper_api_key:
+            try:
+                search_query = f"academic research {missing_item} site:scholar.google.com OR site:researchgate.net OR site:pubmed.ncbi.nlm.nih.gov"
+                headers = {"X-API-KEY": serper_api_key, "Content-Type": "application/json"}
+                payload = {"q": search_query, "num": 5}
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        "https://google.serper.dev/search",
+                        headers=headers,
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=15)
+                    ) as resp:
+                        data = await resp.json()
+
+                organic = data.get("organic", [])
+                if organic:
+                    # Format results as a reference block for the AI
+                    snippets = []
+                    for r in organic[:5]:
+                        snippets.append(f"- [{r.get('title', 'Source')}]({r.get('link', '#')})\n  {r.get('snippet', '')}")
+                    live_context = "\n".join(snippets)
+
+                    # Use AI to synthesize the live search results into usable academic text
+                    synthesis_prompt = f"""
+                    You are an Academic Research Synthesizer.
+                    Based on these live search results, write a concise, well-cited academic summary
+                    that can be referenced inside an assignment.
+
+                    SEARCH QUERY: {missing_item}
+                    SEARCH RESULTS:
+                    {live_context}
+
+                    Write a 200-400 word synthesized academic paragraph with in-text citations (Author, Year format).
+                    Include a References section at the end in APA format.
+                    """
+                    return await self.generate_content(synthesis_prompt, timeout=90)
+
+            except Exception as e:
+                logger.warning(f"Serper search failed, falling back to LLM knowledge: {str(e)}")
+
+        # --- Fallback: LLM Internal Knowledge ---
         system_prompt = f"""
-        You are a Research Assistant. Your goal is to find detailed, factual data about: {missing_item}
-        
+        You are a Research Assistant using your extensive training knowledge.
+        Your goal is to find detailed, factual data about: {missing_item}
+
         CONTEXT: {context}
-        
-        YOUR JOB:
-        Provide a detailed technical/academic summary of information available in the public domain (Kaggle, Scholar, Statista) related to this item. 
-        Focus on relevant statistics, key theories, and publicly available datasets.
-        
-        Do NOT hallucinate. If data is unavailable, state it clearly.
+
+        Provide a detailed technical/academic summary with statistics, key theories, and key authors.
+        Include properly formatted APA references (even if they must be inferred from your knowledge).
+        Do NOT hallucinate — if data is truly unavailable, state it clearly.
         """
-        
         try:
-            # We use a higher timeout as research can be complex
-            result = await self.generate_content(
-                f"Perform research for: {missing_item}",
+            return await self.generate_content(
+                f"Research topic: {missing_item}",
                 system_instruction=system_prompt,
                 timeout=120
             )
-            return result
         except Exception as e:
             logger.error(f"Web research failed: {str(e)}")
-            return f"Research failed for {missing_item}."
+            return f"Could not retrieve research data for: {missing_item}."
 
     async def chat_response(self, history: list, new_message: str) -> str:
         # Deprecated fallback/legacy

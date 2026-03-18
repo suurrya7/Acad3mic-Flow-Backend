@@ -20,14 +20,15 @@ router = APIRouter(
 async def process_assignment_task(assignment_id: str, user_id: str, topic: str, instructions: str, combined_docs_text: str):
     """
     Background task to process the academic assignment pipeline.
-    Includes Intelligent Requirement Check and Web Research Fallback.
+    Includes Intelligent Requirement Check, Interactive Pause (awaiting_info), 
+    Live Web Research, and Checkpoint-based resumption.
     """
     ai_service = get_ai_service()
     supabase = get_supabase_admin()
     
     try:
         # 1. Evaluate Data Sufficiency
-        logger.info(f"Checking sufficiency for assignment {assignment_id}")
+        logger.info(f"[{assignment_id}] Checking data sufficiency...")
         sufficiency = await ai_service.evaluate_data_sufficiency(
             topic=topic,
             instructions=instructions,
@@ -39,58 +40,57 @@ async def process_assignment_task(assignment_id: str, user_id: str, topic: str, 
             action = sufficiency.get("suggested_action", "ask_user")
             missing = sufficiency.get("missing_items", [])
             reason = sufficiency.get("reason", "Incomplete data.")
-            missing_str = ", ".join(missing)
             
             if action == "ask_user":
-                # In background tasks, we can't pause easily. 
-                # We mark as failed with a CLEAR message asking for info.
-                error_msg = f"Incomplete requirements detected: {missing_str}. {reason} Please provide these details and resubmit."
+                # Mark as AWAITING_INFO (not failed!) — the user can re-submit with more info
+                logger.warning(f"[{assignment_id}] Pausing — awaiting user info: {missing}")
                 supabase.table("assignments").update({
-                    "status": "failed",
-                    "error_message": error_msg
+                    "status": "awaiting_info",
+                    "missing_info_details": missing,
+                    "error_message": f"The AI needs more information: {reason}"
                 }).eq("id", assignment_id).execute()
-                logger.warning(f"Assignment {assignment_id} failed: Missing requirements {missing_str}")
-                return # Exit
-
+                return  # Pause cleanly — do not fail
+            
             elif action == "search_web":
-                # Fallback to research
-                logger.info(f"Performing online research for assignment {assignment_id}")
+                # Research each missing item live
+                logger.info(f"[{assignment_id}] Researching {len(missing)} missing items online...")
                 for item in missing:
                     research_res = await ai_service.perform_web_research(item, context=instructions)
-                    researched_data += f"\n--- Online Research for {item} ---\n{research_res}\n"
+                    researched_data += f"\n--- Online Research: {item} ---\n{research_res}\n"
 
-        # 2. Generate Content
-        logger.info(f"Starting assignment generation for {assignment_id}")
+        # 2. Generate Content (with checkpoint-based resumption)
+        logger.info(f"[{assignment_id}] Starting assignment generation...")
         
         final_text = await ai_service.generate_assignment(
             topic=topic,
             instructions=instructions,
             files_content=combined_docs_text,
-            researched_data=researched_data
+            researched_data=researched_data,
+            assignment_id=assignment_id  # Enables per-section checkpointing
         )
         
-        logger.info(f"Assignment generation complete for {assignment_id}")
+        logger.info(f"[{assignment_id}] Generation complete. Words: {len(final_text.split())}")
         
-        # 3. Save output
+        # 3. Save completed output
         supabase.table("assignments").update({
             "status": "completed",
-            "output_text": final_text
+            "output_text": final_text,
+            "error_message": None,
+            "missing_info_details": None
         }).eq("id", assignment_id).execute()
         
-        # 4. Deduct Words
+        # 4. Deduct words (non-fatal if it fails)
         try:
             word_count = len(final_text.split())
             user_service.deduct_words(user_id, word_count)
         except Exception as deduct_err:
-            logger.warning(f"Word deduction failed for {assignment_id}: {str(deduct_err)}")
+            logger.warning(f"[{assignment_id}] Word deduction failed: {str(deduct_err)}")
         
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        # Log to server logs with full traceback
-        logger.error(f"Assignment failure for {assignment_id}: {str(e)}\n{error_details}")
+        logger.error(f"[{assignment_id}] Fatal error:\n{error_details}")
         
-        # Determine a user-friendly but detailed error message
         friendly_error = str(e)
         if "404" in friendly_error:
             friendly_error = f"AI Model Configuration Error: {friendly_error}. Check GEMINI_MODEL_NAME environment variable."
@@ -101,6 +101,7 @@ async def process_assignment_task(assignment_id: str, user_id: str, topic: str, 
             "status": "failed",
             "error_message": friendly_error
         }).eq("id", assignment_id).execute()
+
 
 @router.post("/submit", response_model=AssignmentResponse, status_code=202)
 @limiter.limit("5/minute")

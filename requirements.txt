@@ -12,3 +12,4 @@ python-multipart==0.0.9
 python-jose[cryptography]==3.3.0
 python-pptx>=1.0.2
 openpyxl>=3.1.5
+aiohttp>=3.9.0

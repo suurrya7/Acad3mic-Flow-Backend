@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str
     GEMINI_MODEL_NAME: str = "models/gemini-3.1-flash-lite-preview"
     
+    # Optional: Serper.dev API key for live scholarly research
+    # If not set, falls back to LLM internal knowledge
+    SERPER_API_KEY: str = ""
+    
     # Payment Conversion
     USD_TO_INR: float = 85.0 # Conversion rate for PayU
     
