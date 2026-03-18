@@ -76,47 +76,56 @@ async def create_payu_order(
         "firstname": request.firstname,
         "email": request.email,
         "key": settings.PAYU_MERCHANT_KEY,
+        # surl: backend webhook to verify hash and credit words
         "surl": f"{settings.API_BASE_URL}/payments/payu/webhook",
-        "furl": f"{settings.API_BASE_URL}/payments/payu/webhook"
+        # furl: cancelled/failed payments go directly to frontend profile page — never expose Render URL
+        "furl": f"{settings.FRONTEND_URL}/profile?payment=cancelled"
     }
 
 @router.post("/payu/webhook")
 async def payu_webhook(request: Request):
     """
-    Handle PayU Callback.
-    Note: PayU sends data as Form Data.
+    Handle PayU Callback (surl only — furl goes directly to frontend).
+    Note: PayU sends data as Form Data (POST).
+    On success: credit user words, then redirect to frontend success page.
+    On fail: redirect to frontend billing page.
     """
+    from fastapi.responses import RedirectResponse
+    
     form_data = await request.form()
     data = dict(form_data)
     
     status = data.get("status")
     txnid = data.get("txnid")
     
+    # Redirect destinations (never expose raw Render URL to user)
+    success_url = f"{settings.FRONTEND_URL}/profile?payment=success"
+    failure_url = f"{settings.FRONTEND_URL}/profile?payment=failed"
+    
     if not txnid:
-        return {"status": "failed", "message": "No txnid"}
+        return RedirectResponse(url=failure_url, status_code=303)
 
     supabase = get_supabase_admin()
     
     # 1. Verify Hash
     if not payment_service.verify_hash(data, status):
         logger.error(f"Hash verification failed for txn {txnid}")
-        return {"status": "failed", "message": "Invalid Hash"}
+        return RedirectResponse(url=failure_url, status_code=303)
         
     # 2. Get Transaction from DB
     txn_res = supabase.table("transactions").select("*").eq("provider_ref", txnid).single().execute()
     if not txn_res.data:
         logger.error(f"Transaction not found for {txnid}")
-        return {"status": "failed", "message": "Transaction not found"}
+        return RedirectResponse(url=failure_url, status_code=303)
     
     txn = txn_res.data
     user_id = txn["user_id"]
     words_to_add = txn["words_purchased"]
 
-    # IDEMPOTENCY GUARD: If already processed, return success silently.
-    # This prevents double-crediting if PayU retries the webhook.
+    # IDEMPOTENCY GUARD: If already processed, redirect to success silently.
     if txn.get("status") == "success":
         logger.info(f"Webhook replay detected for already-processed txn {txnid}. Ignoring.")
-        return {"status": "success"}
+        return RedirectResponse(url=success_url, status_code=303)
 
     if status == "success":
         # 3. Update Transaction Status
@@ -136,8 +145,9 @@ async def payu_webhook(request: Request):
             supabase.table("user_profiles").update({"word_balance": current_balance + words_to_add}).eq("id", user_id).execute()
 
         logger.info(f"Credited {words_to_add} words to user {user_id} for txn {txnid}")
-        return {"status": "success"}
+        # Redirect user to frontend success page — never expose Render URL
+        return RedirectResponse(url=success_url, status_code=303)
 
     else:
         supabase.table("transactions").update({"status": "failed"}).eq("id", txn["id"]).execute()
-        return {"status": "failed"}
+        return RedirectResponse(url=failure_url, status_code=303)
