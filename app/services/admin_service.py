@@ -55,9 +55,18 @@ class AdminService:
             
             result = query.range(offset, offset + per_page - 1).execute()
             
+            # DIAGNOSTIC: If count > 0 but data is empty or only contains 1 user (the admin), 
+            # it strongly suggests RLS is interfering because the SERVICE_ROLE_KEY is misconfigured.
+            if result.count > 0 and len(result.data) < min(result.count, per_page):
+                logger.warning(
+                    f"RLS POTENTIAL INTERFERENCE: Query reported {result.count} total users, "
+                    f"but only returned {len(result.data)} rows. Check SUPABASE_SERVICE_ROLE_KEY."
+                )
+
             return {
                 "data": result.data,
                 "total": result.count,
+
                 "page": page,
                 "per_page": per_page,
                 "total_pages": (result.count + per_page - 1) // per_page

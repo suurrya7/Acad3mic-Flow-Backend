@@ -22,7 +22,7 @@ CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
     INSERT INTO public.user_profiles (id, email, word_balance, grading_balance, subscription_tier, last_reset_date)
-    VALUES (new.id, new.email, 2000, 3, 'Free', CURRENT_DATE);
+    VALUES (new.id, new.email, 2000, 2, 'Free', CURRENT_DATE);
     RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
