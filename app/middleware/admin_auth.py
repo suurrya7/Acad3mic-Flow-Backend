@@ -19,23 +19,20 @@ async def require_admin(current_user: dict = Depends(get_current_user)):
     """
     try:
         user_id = current_user.get("id")
+        user_profile = current_user.get("profile")
         
-        if not user_id:
+        if not user_id or not user_profile:
+            logger.error(f"require_admin: Missing user_id or profile in current_user context")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication required"
             )
         
-        # Check if user has admin flag
-        supabase = get_supabase_admin()
-        result = supabase.table("user_profiles")\
-            .select("is_admin, email")\
-            .eq("id", user_id)\
-            .single()\
-            .execute()
+        # Check if user has admin flag from the profile already fetched by get_current_user
+        is_admin = user_profile.get("is_admin", False)
         
-        if not result.data or not result.data.get("is_admin"):
-            logger.warning(f"Unauthorized admin access attempt by {user_id}")
+        if not is_admin:
+            logger.warning(f"Unauthorized admin access attempt by {user_id} ({current_user.get('email')})")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Admin access required"
@@ -45,8 +42,9 @@ async def require_admin(current_user: dict = Depends(get_current_user)):
         return {
             **current_user,
             "is_admin": True,
-            "admin_email": result.data.get("email")
+            "admin_email": user_profile.get("email")
         }
+
         
     except HTTPException:
         raise
