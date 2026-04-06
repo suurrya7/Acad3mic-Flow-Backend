@@ -250,6 +250,38 @@ class AIService:
         strategy = await self.generate_content(user_prompt, system_instruction=system_prompt, timeout=300)
         return strategy
 
+    def _detect_citation_requirements(self, instructions: str) -> dict:
+        """
+        Parses user instructions to extract citation format and reference count.
+        """
+        import re
+        instructions_lower = instructions.lower()
+        
+        # Detect citation format
+        citation_format = "APA"  # Default
+        format_map = {
+            "harvard": "Harvard",
+            "apa": "APA",
+            "mla": "MLA",
+            "chicago": "Chicago",
+            "ieee": "IEEE",
+            "vancouver": "Vancouver",
+            "oscola": "OSCOLA",
+            "turabian": "Turabian",
+        }
+        for key, value in format_map.items():
+            if key in instructions_lower:
+                citation_format = value
+                break
+        
+        # Detect reference count (e.g., "8 references", "10 sources", "at least 5 references")
+        ref_count = 8  # Default
+        ref_match = re.search(r'(\d+)\s*(?:references?|sources?|citations?)', instructions_lower)
+        if ref_match:
+            ref_count = int(ref_match.group(1))
+        
+        return {"format": citation_format, "count": ref_count}
+
     async def generate_assignment(self, topic: str, instructions: str, files_content: str = "", researched_data: str = "", assignment_id: str = None) -> str:
         """
         Generates the initial academic content before humanization.
@@ -257,6 +289,12 @@ class AIService:
         """
         import json
         import math
+        
+        # Detect citation requirements from user instructions
+        citation_req = self._detect_citation_requirements(instructions)
+        citation_format = citation_req["format"]
+        ref_count = citation_req["count"]
+        logger.info(f"Detected citation requirements: {citation_format} format, {ref_count} references")
         
         # ---------------------------------------------------------
         # PHASE 1: Generate Strategic Outline & Chunk Word Counts
@@ -271,6 +309,8 @@ class AIService:
         1. Identify the requested Total Word Count from the instructions (assume 2000 words if not explicitly stated).
         2. Break the assignment down into logical, comprehensive sections (e.g., Introduction, Literature Review, Methodology, Discussion, Conclusion).
         3. Assign a strict target word count to each section so that they mathematically sum to the Total Word Count.
+        4. MANDATORY: The LAST section MUST ALWAYS be "References" with focus on compiling all cited sources in {citation_format} format. Assign it 200-400 words.
+        5. MANDATORY CITATION FORMAT: The assignment requires {citation_format} referencing style with at least {ref_count} references.
         
         OUTPUT FORMAT (STRICT JSON):
         {{
@@ -278,13 +318,18 @@ class AIService:
             "sections": [
                 {{
                     "heading": "Introduction",
-                    "focus": "Introduce the context, define key terms, and state the thesis.",
+                    "focus": "Introduce the context, define key terms, and state the thesis. Include in-text citations.",
                     "target_words": 200
                 }},
                 {{
                     "heading": "Literature Review",
-                    "focus": "Analyze current research...",
+                    "focus": "Analyze current research with in-text citations...",
                     "target_words": 800
+                }},
+                {{
+                    "heading": "References",
+                    "focus": "Compile ALL sources cited throughout the assignment in {citation_format} format.",
+                    "target_words": 300
                 }}
             ]
         }}
@@ -309,11 +354,12 @@ class AIService:
             
         except Exception as e:
             logger.error(f"Outline generation failed: {str(e)}")
-            # Fallback Outline
+            # Fallback Outline (always includes References)
             sections = [
                 {"heading": "Introduction", "focus": "Introduce the topic and outline the essay.", "target_words": 300},
-                {"heading": "Main Body", "focus": "Discuss the core concepts, provide evidence, and analyze the topic deeply.", "target_words": 1400},
-                {"heading": "Conclusion", "focus": "Summarize key findings and conclude.", "target_words": 300}
+                {"heading": "Main Body", "focus": "Discuss the core concepts, provide evidence, and analyze the topic deeply.", "target_words": 1200},
+                {"heading": "Conclusion", "focus": "Summarize key findings and conclude.", "target_words": 200},
+                {"heading": "References", "focus": f"Compile ALL cited sources in {citation_format} format. Minimum {ref_count} references.", "target_words": 300}
             ]
             
         # ---------------------------------------------------------
@@ -326,27 +372,52 @@ class AIService:
             focus = section.get("focus", "Discuss the required topic.")
             target_words = section.get("target_words", 500)
             
-            chunk_system_prompt = f"""
-            You are Acad3mic-Flow AI, an advanced academic assistant.
-            Your task is to generate ONE specific section of a larger academic assignment.
+            # Determine if this is the References section
+            is_references_section = heading.lower() in ["references", "bibliography", "works cited", "reference list"]
             
-            RULES:
-            - Use formal academic tone.
-            - Include citations where appropriate.
-            - Structure with clear sub-headings and paragraphs.
-            - NO Emojis.
-            - CRITICAL INSTRUCTIONS ADHERENCE: You MUST strictly adhere to ALL instructions provided in the Reference Material.
-            
-            EXTREME LENGTH & STRUCTURE DIRECTIVE:
-            - You are writing the "{heading}" section.
-            - You MUST write EXACTLY {target_words} words for this section. Do NOT fall short.
-            - To achieve this exact length naturally, use deeply nested structures, exhaustive multi-paragraph arguments, robust examples, counter-arguments, and deep theoretical analyses.
-            - NEVER output abbreviated, truncated, or summarized content. Provide the full, unabridged text required.
-            """
+            if is_references_section:
+                chunk_system_prompt = f"""
+                You are an Academic Reference Compiler.
+                Your task is to compile a complete, properly formatted {citation_format} reference list.
+                
+                RULES:
+                - List ALL sources that were cited as in-text citations in the preceding sections.
+                - Format EVERY reference in strict {citation_format} style.
+                - Include at minimum {ref_count} references.
+                - Each reference must be complete with author(s), year, title, publisher/journal, DOI/URL where applicable.
+                - Sort references alphabetically by author surname.
+                - Do NOT include any prose or commentary — ONLY the reference list.
+                """
+            else:
+                chunk_system_prompt = f"""
+                You are Acad3mic-Flow AI, an advanced academic assistant.
+                Your task is to generate ONE specific section of a larger academic assignment.
+                
+                RULES:
+                - Use formal academic tone.
+                - Structure with clear sub-headings and paragraphs.
+                - NO Emojis.
+                - CRITICAL INSTRUCTIONS ADHERENCE: You MUST strictly adhere to ALL instructions provided in the Reference Material.
+                
+                MANDATORY CITATION DIRECTIVE:
+                - You MUST use {citation_format} in-text citations throughout this section.
+                - Cite real, credible academic sources (journals, books, conference papers).
+                - Every major claim, statistic, or theory MUST have an in-text citation.
+                - Use the format prescribed by {citation_format} style (e.g., for Harvard: (Author, Year), for APA: (Author, Year), for IEEE: [1]).
+                - Target at least 2-4 unique in-text citations per section.
+                
+                EXTREME LENGTH & STRUCTURE DIRECTIVE:
+                - You are writing the "{heading}" section.
+                - You MUST write EXACTLY {target_words} words for this section. Do NOT fall short.
+                - To achieve this exact length naturally, use deeply nested structures, exhaustive multi-paragraph arguments, robust examples, counter-arguments, and deep theoretical analyses.
+                - NEVER output abbreviated, truncated, or summarized content. Provide the full, unabridged text required.
+                """
             
             chunk_user_prompt = f"""
             OVERALL ASSIGNMENT TOPIC: {topic}
             OVERALL INSTRUCTIONS: {instructions}
+            CITATION FORMAT: {citation_format} (You MUST use this format for all citations)
+            REQUIRED REFERENCES: At least {ref_count} unique sources across the full assignment.
             
             YOUR CURRENT TASK: Write the "{heading}" section ONLY.
             SECTION FOCUS: {focus}
@@ -357,7 +428,7 @@ class AIService:
                 chunk_user_prompt += f"\n\nReference Material (Full Content):\n{files_content}"
             
             if researched_data:
-                chunk_user_prompt += f"\n\nExtracted Online Research Data:\n{researched_data}"
+                chunk_user_prompt += f"\n\nACADEMIC SOURCES FROM LIVE RESEARCH (You MUST cite these using in-text citations):\n{researched_data}"
                 
             # Generate the specific section (with checkpoint support)
             try:
