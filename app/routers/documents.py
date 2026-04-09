@@ -72,20 +72,23 @@ async def upload_document(
          raise HTTPException(status_code=400, detail="Could not extract text from file")
          
     # 3. Upload to Supabase Storage
-    # Generate unique path
-    file_ext = file.filename.split('.')[-1]
-    storage_path = f"{user_id}/{uuid4()}.{file_ext}"
-    
-    # Supabase storage upload
     try:
+        storage_path = f"{user_id}/{uuid4()}.{file_ext}"
+        
+        # We use the raw bytes 'content' read earlier
         res = supabase.storage.from_("assignments").upload(
             path=storage_path,
             file=content,
             file_options={"content-type": file.content_type}
         )
     except Exception as e:
-        # If bucket missing or other error
-        raise HTTPException(status_code=500, detail="Storage upload failed. Ensure 'assignments' bucket exists.")
+        # Log the specific error for debugging
+        logger.error(f"Storage upload failed for {file.filename}: {str(e)}")
+        # If it's a bucket missing error, we suggest the fix
+        if "bucket" in str(e).lower() or "not found" in str(e).lower():
+            raise HTTPException(status_code=500, detail="Storage bucket 'assignments' not found. Please create it or run scripts.setup_storage.")
+        
+        raise HTTPException(status_code=500, detail=f"Storage upload failed: {str(e)}")
 
     # 3. Save Metadata & Extracted Text to DB
     doc_data = {

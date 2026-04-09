@@ -13,21 +13,51 @@ def create_storage_bucket():
     
     try:
         # Attempt to create the bucket
-        bucket_config = {
-            "public": False,
-            "file_size_limit": 10485760,  # 10MB
-            "allowed_mime_types": ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "text/plain"]
-        }
-        
-        supabase.storage.create_bucket("assignments", bucket_config)
+        supabase.storage.create_bucket(
+            id="assignments",
+            options={
+                "public": False,
+                "file_size_limit": 10485760,  # 10MB
+                "allowed_mime_types": [
+                    "application/pdf", 
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
+                    "application/msword",
+                    "text/plain",
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/vnd.ms-excel"
+                ]
+            }
+        )
         logger.info("✓ Successfully created 'assignments' storage bucket")
         print("✓ Successfully created 'assignments' storage bucket")
         
     except Exception as e:
         error_msg = str(e)
         if "already exists" in error_msg.lower() or "duplicate" in error_msg.lower():
-            logger.info("✓ Storage bucket 'assignments' already exists")
-            print("✓ Storage bucket 'assignments' already exists")
+            try:
+                # If it exists, update it to ensure settings are correct
+                supabase.storage.update_bucket(
+                    id="assignments",
+                    options={
+                        "public": False,
+                        "file_size_limit": 10485760,
+                        "allowed_mime_types": [
+                            "application/pdf", 
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
+                            "application/msword",
+                            "text/plain",
+                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            "application/vnd.ms-excel"
+                        ]
+                    }
+                )
+                logger.info("✓ Successfully updated 'assignments' storage bucket configuration")
+                print("✓ Successfully updated 'assignments' storage bucket configuration")
+            except Exception as update_err:
+                logger.error(f"✗ Failed to update existing storage bucket: {str(update_err)}")
+                print(f"✗ Failed to update existing storage bucket: {str(update_err)}")
         else:
             logger.error(f"✗ Failed to create storage bucket: {error_msg}")
             print(f"✗ Failed to create storage bucket: {error_msg}")

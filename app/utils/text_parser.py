@@ -56,19 +56,27 @@ async def extract_text_from_file(file: UploadFile) -> str:
                     if hasattr(shape, "text"):
                         text += shape.text + "\n"
 
-        elif filename.endswith(".xlsx") or filename.endswith(".xls"):
+        elif filename.endswith(".xlsx") or filename.endswith(".xls") or filename.endswith(".xlsm"):
             if not openpyxl:
                 raise HTTPException(status_code=500, detail="Excel support not installed")
-            wb = openpyxl.load_workbook(file_stream, data_only=True)
-            for sheet in wb.worksheets:
-                for row in sheet.iter_rows(values_only=True):
-                    text += " ".join([str(cell) for cell in row if cell is not None]) + "\n"
-                
+            try:
+                wb = openpyxl.load_workbook(file_stream, data_only=True)
+                texts = []
+                for sheet in wb.worksheets:
+                    for row in sheet.iter_rows(values_only=True):
+                        texts.append(" ".join([str(cell) for cell in row if cell is not None]))
+                return "\n".join(texts)
+            except Exception as e:
+                # openpyxl doesn't support old .xls format
+                if filename.endswith(".xls"):
+                    raise HTTPException(status_code=400, detail="Standard .xls files are old. Please convert to .xlsx or upload as PDF.")
+                raise e
+            
         elif filename.endswith(".txt"):
-            text = content.decode("utf-8")
+            return content.decode("utf-8", errors="ignore")
             
         else:
-            raise HTTPException(status_code=400, detail="Unsupported file type. Use PDF, DOCX, TXT, PPTX, or XLSX.")
+            raise HTTPException(status_code=400, detail="Unsupported file format. Please use PDF, DOCX, PPTX, XLSX, or plain TXT.")
             
     except Exception as e:
         logger.error(f"Error parsing file {filename}: {str(e)}")
