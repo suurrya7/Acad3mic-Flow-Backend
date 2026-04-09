@@ -17,5 +17,7 @@ class AssignmentResponse(BaseModel):
     id: UUID
     title: str
     status: str
-    output_text: Optional[str]
+    output_text: Optional[str] = None
+    missing_info_details: Optional[List[str]] = None
+    error_message: Optional[str] = None
     created_at: datetime

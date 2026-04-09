@@ -51,6 +51,7 @@ class UserUpdate(BaseModel):
     subscription_tier: Optional[str] = Field(None, description="Free, Basic, Standard, or Premium")
     word_balance: Optional[int] = Field(None, ge=0)
     grading_balance: Optional[int] = Field(None, ge=0)
+    is_admin: Optional[bool] = None
     is_banned: Optional[bool] = None
     notes: Optional[str] = Field(None, max_length=500)
 
