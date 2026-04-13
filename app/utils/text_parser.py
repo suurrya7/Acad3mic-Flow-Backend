@@ -37,7 +37,7 @@ async def _gemini_ocr_pdf(pdf_bytes: bytes) -> str:
         # Explicitly configure with API key — text_parser is a standalone module
         # and may be used before ai_service.py has been imported/configured.
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel(settings.GEMINI_MODEL_NAME)
 
         pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
 
