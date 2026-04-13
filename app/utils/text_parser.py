@@ -31,11 +31,14 @@ async def _gemini_ocr_pdf(pdf_bytes: bytes) -> str:
     """Use Gemini's multimodal vision to OCR a scanned/image-based PDF."""
     try:
         import google.generativeai as genai
-        from app.config import settings
+        from app.config import get_settings
+
+        settings = get_settings()
+        # Explicitly configure with API key — text_parser is a standalone module
+        # and may be used before ai_service.py has been imported/configured.
         genai.configure(api_key=settings.GEMINI_API_KEY)
         model = genai.GenerativeModel("gemini-1.5-flash")
 
-        # Encode PDF as base64 inline data
         pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
 
         response = model.generate_content([
@@ -48,9 +51,11 @@ async def _gemini_ocr_pdf(pdf_bytes: bytes) -> str:
             "Please extract and transcribe ALL text content from this document exactly as it appears. "
             "Preserve headings, paragraphs, and lists. Output only the extracted text, nothing else."
         ])
-        return response.text or ""
+        extracted = response.text or ""
+        logger.info(f"Gemini OCR returned {len(extracted)} characters")
+        return extracted
     except Exception as e:
-        logger.error(f"Gemini OCR fallback failed: {str(e)}")
+        logger.error(f"Gemini OCR fallback failed with error: {type(e).__name__}: {str(e)}")
         return ""
 
 
