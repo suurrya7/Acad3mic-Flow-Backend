@@ -37,6 +37,8 @@ async def extract_text_from_file(file: UploadFile) -> str:
             if not PdfReader:
                  raise HTTPException(status_code=500, detail="PDF support not installed")
             reader = PdfReader(file_stream)
+            if len(reader.pages) > 50:
+                 raise HTTPException(status_code=400, detail="PDF exceeds the 50-page maximum limit.")
             for page in reader.pages:
                 text += (page.extract_text() or "") + "\n"
                 

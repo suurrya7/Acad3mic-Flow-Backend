@@ -1,14 +1,56 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import RedirectResponse
 
 from app.dependencies import get_current_user
 from app.db.supabase import get_supabase_admin
 from app.utils.text_parser import extract_text_from_file
 from app.models.assignment import DocumentResponse
+from app.services.ai_service import AIService, get_ai_service
 from uuid import uuid4
 import logging
+import json
 
 logger = logging.getLogger("documents")
+
+async def summarize_document_task(document_id: str, document_text: str):
+    """Background task to generate AI summary and tags for a newly uploaded document."""
+    try:
+        supabase = get_supabase_admin()
+        ai_service = get_ai_service()
+        
+        prompt = f"""
+        You are an intelligent document analyzer. Read the following document text and provide:
+        1. "summary": A concise 2-sentence summary of the document's main idea.
+        2. "tag": A single, highly descriptive 1-3 word tag/category (e.g., "Biology Notes", "Project Proposal").
+
+        Output EXACTLY a valid JSON object with the keys "summary" and "tag". Do not output markdown code blocks.
+
+        Document Text:
+        {document_text[:10000]}
+        """
+        
+        result_text = await ai_service.generate_content(prompt, system_instruction="Output valid JSON only.", timeout=30)
+        
+        # Clean up JSON if needed
+        clean_json = result_text.strip()
+        if clean_json.startswith("```json"):
+            clean_json = clean_json.split("```json")[1].split("```")[0].strip()
+        elif clean_json.startswith("```"):
+            clean_json = clean_json.split("```")[1].split("```")[0].strip()
+            
+        data = json.loads(clean_json)
+        ai_summary = data.get("summary", "Document summarized.")
+        ai_tag = data.get("tag", "Document")
+        
+        supabase.table("documents").update({
+            "ai_summary": ai_summary,
+            "ai_tag": ai_tag
+        }).eq("id", document_id).execute()
+        
+        logger.info(f"Summarized document {document_id}: {ai_tag}")
+        
+    except Exception as e:
+        logger.error(f"Summarization failed for document {document_id}: {str(e)}")
 
 # Allowed file types for upload
 ALLOWED_EXTENSIONS = {"pdf", "docx", "txt", "doc", "pptx", "xlsx", "xls"}
@@ -30,6 +72,7 @@ router = APIRouter(
 
 @router.post("/upload", response_model=DocumentResponse)
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...), 
     current_user: dict = Depends(get_current_user)
 ):
@@ -90,18 +133,38 @@ async def upload_document(
         
         raise HTTPException(status_code=500, detail=f"Storage upload failed: {str(e)}")
 
-    # 3. Save Metadata & Extracted Text to DB
+    # 4. Upload to Gemini Files API
+    gemini_file_uri = None
+    try:
+        ai_service = AIService()
+        gemini_file_uri = await ai_service.upload_to_gemini_files(
+            file_bytes=content,
+            mime_type=file.content_type,
+            filename=file.filename
+        )
+    except Exception as e:
+        logger.error(f"Failed to upload {file.filename} to Gemini Files API: {str(e)}")
+        # We don't fail the whole request here, the DB structure allows NULL
+        pass
+
+    # 5. Save Metadata & Extracted Text to DB
     doc_data = {
         "user_id": user_id,
         "filename": file.filename,
         "storage_path": storage_path,
-        "content_extracted": extracted_text
+        "content_extracted": extracted_text,
+        "gemini_file_uri": gemini_file_uri
     }
     
     db_res = supabase.table("documents").insert(doc_data).execute()
     
     if not db_res.data:
          raise HTTPException(status_code=500, detail="Failed to save document metadata")
+         
+    new_doc_id = db_res.data[0]["id"]
+    
+    # 6. Background Task for AI Summary & Tags
+    background_tasks.add_task(summarize_document_task, new_doc_id, extracted_text)
          
     return db_res.data[0]
     
@@ -110,7 +173,7 @@ async def list_documents(current_user: dict = Depends(get_current_user)):
     supabase = get_supabase_admin()
     user_id = current_user["id"]
     
-    response = supabase.table("documents").select("id, filename, created_at").eq("user_id", user_id).execute()
+    response = supabase.table("documents").select("id, filename, ai_summary, ai_tag, created_at").eq("user_id", user_id).execute()
     return response.data
 
 @router.get("/{document_id}/download")

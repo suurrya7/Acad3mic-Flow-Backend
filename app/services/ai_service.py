@@ -1,5 +1,6 @@
 import asyncio
 import os
+import tempfile
 import google.generativeai as genai
 from app.config import get_settings
 from app.utils.logger import logger
@@ -24,6 +25,43 @@ class AIService:
         # Always get fresh settings to ensure we pick up environment overrides
         current_settings = get_settings()
         self.model = genai.GenerativeModel(current_settings.GEMINI_MODEL_NAME)
+
+    async def upload_to_gemini_files(self, file_bytes: bytes, mime_type: str, filename: str) -> str:
+        """
+        Uploads a document to Gemini Files API and returns the URI.
+        Blocks the event loop briefly for file I/O, but uploading is offloaded.
+        """
+        import asyncio
+        import tempfile
+        import os
+        from google.generativeai.types import File
+
+        def _upload_sync() -> str:
+            # We must use a real temp file because Gemini SDK requires a file path
+            # Extract extension securely
+            ext = ""
+            if "." in filename:
+                ext = f".{filename.split('.')[-1]}"
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_file:
+                tmp_file.write(file_bytes)
+                tmp_path = tmp_file.name
+                
+            try:
+                # Upload using genai
+                uploaded_file: File = genai.upload_file(
+                    path=tmp_path,
+                    mime_type=mime_type,
+                    display_name=filename[:200]
+                )
+                logger.info(f"Uploaded file to Gemini: {uploaded_file.name} (URI: {uploaded_file.uri})")
+                return uploaded_file.name
+            finally:
+                # Always clean up
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                    
+        return await asyncio.to_thread(_upload_sync)
 
     def extract_json_from_text(self, text: str) -> str:
         """
@@ -57,13 +95,13 @@ class AIService:
             
         return json_str
 
-    async def generate_content(self, prompt: str, system_instruction: str = None, timeout: int = 120) -> str:
+    async def generate_content(self, prompt: str | list, system_instruction: str = None, timeout: int = 120) -> str:
         """
         Generates content using the internal AI model with timeout protection.
         Returns ONLY the text content.
         
         Args:
-            prompt: The user prompt
+            prompt: The user prompt or list of parts (e.g. text + files)
             system_instruction: Optional system-level instructions
             timeout: Maximum time to wait for response (default 120s)
         """
@@ -72,11 +110,19 @@ class AIService:
         try:
             # Construct the full prompt if system instruction is provided
             full_prompt = prompt
-            if system_instruction:
-                full_prompt = f"System Instruction:\n{system_instruction}\n\nUser Request:\n{prompt}"
+            prompt_len = 0
+            
+            if isinstance(prompt, list):
+                if system_instruction:
+                    full_prompt = [f"System Instruction:\n{system_instruction}\n\nUser Request:"] + prompt
+                prompt_len = len(str(full_prompt))
+            else:
+                if system_instruction:
+                    full_prompt = f"System Instruction:\n{system_instruction}\n\nUser Request:\n{prompt}"
+                prompt_len = len(full_prompt)
 
             # Log prompt size for debugging
-            logger.info(f"Sending AI Request: prompt_len={len(full_prompt)} chars, timeout={timeout}s")
+            logger.info(f"Sending AI Request: prompt_len={prompt_len} chars/items, timeout={timeout}s")
 
             # Wrap synchronous call with asyncio timeout and add retries
             max_retries = 3
@@ -140,7 +186,7 @@ class AIService:
 
     async def humanize_text(self, text: str) -> str:
         """
-        Applies the mandatory 3-pass humanization layer.
+        Applies the mandatory content-refinement layer.
         Now uses a chunking strategy for large documents (up to 30k+ words) 
         to avoid AI output token limits and truncation.
         """
@@ -156,11 +202,11 @@ class AIService:
             words = text.split()
             if len(words) <= 2200:
                 # Small enough for a single pass
-                prompt = f"Original Text to Humanize:\n\n{text}"
+                prompt = f"Original Text to Refine:\n\n{text}"
                 return await self.generate_content(prompt, system_instruction=system_instruction)
 
             # 3. Large Document Path: Chunking
-            logger.info(f"Large document detected ({len(words)} words). Starting chunked humanization.")
+            logger.info(f"Large document detected ({len(words)} words). Starting chunked refinement.")
             
             # Split by paragraphs to avoid cutting mid-sentence
             paragraphs = text.split('\n')
@@ -182,29 +228,105 @@ class AIService:
             if current_chunk:
                 chunks.append('\n'.join(current_chunk))
 
-            logger.info(f"Split document into {len(chunks)} chunks for humanization.")
+            logger.info(f"Split document into {len(chunks)} chunks for refinement.")
             
             # 4. Process Chunks (Iteratively to avoid rate limits and for memory safety)
-            humanized_chunks = []
+            refined_chunks = []
             for i, chunk_text in enumerate(chunks):
-                logger.info(f"Humanizing chunk {i+1}/{len(chunks)} ({len(chunk_text.split())} words)...")
-                prompt = f"Original Text to Humanize (Part {i+1} of {len(chunks)}):\n\n{chunk_text}"
+                logger.info(f"Refining chunk {i+1}/{len(chunks)} ({len(chunk_text.split())} words)...")
+                prompt = f"Original Text to Refine (Part {i+1} of {len(chunks)}):\n\n{chunk_text}"
                 
-                # Use a slightly longer timeout for humanization if needed
-                h_chunk = await self.generate_content(prompt, system_instruction=system_instruction, timeout=180)
-                humanized_chunks.append(h_chunk.strip())
+                # Use a slightly longer timeout for refinement if needed
+                r_chunk = await self.generate_content(prompt, system_instruction=system_instruction, timeout=180)
+                refined_chunks.append(r_chunk.strip())
                 
                 # Small sleep to be kind to the API
                 await asyncio.sleep(1)
 
             # 5. Stitching back together
-            return "\n\n".join(humanized_chunks)
+            return "\n\n".join(refined_chunks)
 
         except Exception as e:
             # Final fallback to ensure consistent error message or default behavior
-            logger.error(f"Failed to humanize text: {str(e)}")
+            logger.error(f"Failed to refine text: {str(e)}")
             # If everything fails, we MUST return the original text at minimum so the user doesn't lose data
             return text
+
+    async def refine_content_stream(self, text: str):
+        """
+        Streaming version of the content refinement pipeline.
+        This is an async generator that yields text chunks as they are produced.
+        Used by the SSE endpoint so users see content appearing in real time.
+        Works in chunks for large documents, streaming each chunk.
+        """
+        from app.services.prompt_manager import prompt_manager
+
+        try:
+            active_prompt = await prompt_manager.get_active_prompt()
+            system_instruction = active_prompt.get("prompt_text", HUMANIZER_SYSTEM_PROMPT)
+        except Exception:
+            system_instruction = HUMANIZER_SYSTEM_PROMPT
+
+        # Split into chunks for large documents
+        paragraphs = text.split('\n')
+        chunks = []
+        current_chunk = []
+        current_word_count = 0
+        CHUNK_SIZE = 1800
+
+        for p in paragraphs:
+            p_words = p.split()
+            if current_word_count + len(p_words) > CHUNK_SIZE and current_chunk:
+                chunks.append('\n'.join(current_chunk))
+                current_chunk = [p]
+                current_word_count = len(p_words)
+            else:
+                current_chunk.append(p)
+                current_word_count += len(p_words)
+        if current_chunk:
+            chunks.append('\n'.join(current_chunk))
+
+        total_chunks = len(chunks)
+        logger.info(f"Starting streaming refinement over {total_chunks} chunk(s).")
+
+        for i, chunk_text in enumerate(chunks):
+            prompt = f"System Instruction:\n{system_instruction}\n\nUser Request:\nOriginal Text to Refine (Part {i+1} of {total_chunks}):\n\n{chunk_text}"
+
+            # Capture running loop before any thread jump
+            loop = asyncio.get_running_loop()
+            chunk_queue: asyncio.Queue = asyncio.Queue()
+            _sentinel = object()
+
+            def _sync_stream_chunk(prompt_text=prompt):
+                try:
+                    response = self.model.generate_content(prompt_text, stream=True)
+                    for stream_chunk in response:
+                        try:
+                            txt = stream_chunk.text
+                        except (ValueError, IndexError):
+                            continue
+                        if txt:
+                            asyncio.run_coroutine_threadsafe(chunk_queue.put(txt), loop)
+                except Exception as exc:
+                    logger.error(f"Stream refinement thread error: {exc}")
+                finally:
+                    asyncio.run_coroutine_threadsafe(chunk_queue.put(_sentinel), loop)
+
+            import concurrent.futures
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            loop.run_in_executor(executor, _sync_stream_chunk)
+
+            # Yield tokens as they arrive
+            while True:
+                token = await chunk_queue.get()
+                if token is _sentinel:
+                    break
+                yield token
+
+            # Brief pause between chunks to avoid rate limits
+            if i < total_chunks - 1:
+                yield "\n\n"
+                await asyncio.sleep(1)
 
 
     async def generate_chat_title(self, user_message: str) -> str:
@@ -282,13 +404,24 @@ class AIService:
         
         return {"format": citation_format, "count": ref_count}
 
-    async def generate_assignment(self, topic: str, instructions: str, files_content: str = "", researched_data: str = "", assignment_id: str = None) -> str:
+    async def generate_assignment(self, topic: str, instructions: str, files_content: str = "", researched_data: str = "", assignment_id: str = None, file_uris: list = None, writing_profile: dict = None) -> str:
         """
-        Generates the initial academic content before humanization.
+        Generates the initial academic content before refinement.
         Uses a chunk-based strategy to enforce accurate word counts and instruction adherence.
         """
         import json
         import math
+        
+        # Determine files to pass to Gemini
+        gemini_files = []
+        if file_uris:
+            try:
+                for uri in file_uris:
+                    # 'uri' is actually the Gemini file name here (e.g. 'files/abc123xyz')
+                    f = genai.get_file(uri)
+                    gemini_files.append(f)
+            except Exception as e:
+                logger.error(f"Error retrieving Gemini files: {str(e)}")
         
         # Detect citation requirements from user instructions
         citation_req = self._detect_citation_requirements(instructions)
@@ -299,6 +432,20 @@ class AIService:
         # ---------------------------------------------------------
         # PHASE 1: Generate Strategic Outline & Chunk Word Counts
         # ---------------------------------------------------------
+        
+        # Build Writing Profile Context
+        profile_context = ""
+        if writing_profile and any(writing_profile.values()):
+            profile_context = f"""
+            MANDATORY WRITING STYLE PROFILE:
+            You must adapt your writing style to match the following user rules:
+            - Vocabulary Complexity: {writing_profile.get('vocabulary_level', 'Academic/Standard')}
+            - Tone: {writing_profile.get('tone', 'Objective')}
+            - Formatting Preferences: {writing_profile.get('formatting', 'Standard paragraphs')}
+            - Specific Phrases to Avoid: {writing_profile.get('phrases_to_avoid', 'None')}
+            - Custom Rules: {writing_profile.get('custom_rules', 'None')}
+            """
+
         outline_prompt = f"""
         You are the Head Academic Strategist. Analyze the incoming request and create a detailed structural outline for an assignment.
         
@@ -311,6 +458,8 @@ class AIService:
         3. Assign a strict target word count to each section so that they mathematically sum to the Total Word Count.
         4. MANDATORY: The LAST section MUST ALWAYS be "References" with focus on compiling all cited sources in {citation_format} format. Assign it 200-400 words.
         5. MANDATORY CITATION FORMAT: The assignment requires {citation_format} referencing style with at least {ref_count} references.
+        
+        {profile_context}
         
         OUTPUT FORMAT (STRICT JSON):
         {{
@@ -394,10 +543,12 @@ class AIService:
                 Your task is to generate ONE specific section of a larger academic assignment.
                 
                 RULES:
-                - Use formal academic tone.
+                - Use formal academic tone, but heavily adjusted by the user's Writing Profile.
                 - Structure with clear sub-headings and paragraphs.
                 - NO Emojis.
-                - CRITICAL INSTRUCTIONS ADHERENCE: You MUST strictly adhere to ALL instructions provided in the Reference Material.
+                - CRITICAL INSTRUCTIONS ADHERENCE: You MUST strictly adhere to ALL instructions provided in the Reference Material and Writing Profile.
+                
+                {profile_context}
                 
                 MANDATORY CITATION DIRECTIVE:
                 - You MUST use {citation_format} in-text citations throughout this section.
@@ -430,6 +581,12 @@ class AIService:
             if researched_data:
                 chunk_user_prompt += f"\n\nACADEMIC SOURCES FROM LIVE RESEARCH (You MUST cite these using in-text citations):\n{researched_data}"
                 
+            # Combine text strings into one and prepare the prompt parts
+            chunk_prompt_parts = []
+            if gemini_files:
+                chunk_prompt_parts.extend(gemini_files)
+            chunk_prompt_parts.append(chunk_user_prompt)
+
             # Generate the specific section (with checkpoint support)
             try:
                 # --- If assignment_id provided, check if chunk already exists (resumption) ---
@@ -447,7 +604,7 @@ class AIService:
                         continue  # Skip AI call for this section
 
                 section_text = await self.generate_content(
-                    chunk_user_prompt, 
+                    chunk_prompt_parts, 
                     system_instruction=chunk_system_prompt, 
                     timeout=120
                 )
@@ -809,6 +966,47 @@ class AIService:
         except Exception as e:
             logger.error(f"Data sufficiency check failed: {str(e)}")
             return {"is_sufficient": True, "missing_items": [], "suggested_action": "none", "reason": "System error during check"}
+
+    async def fetch_real_academic_sources(self, topic: str, count: int = 5) -> str:
+        """
+        Pre-fetches a baseline of real academic sources related to the topic using Serper API.
+        This provides verified citations to prevent hallucination during generation.
+        """
+        import aiohttp
+        
+        serper_api_key = getattr(settings, 'SERPER_API_KEY', None)
+        if not serper_api_key:
+            return "" # Fall back to no real-time sources if API not configured
+
+        try:
+            search_query = f"academic research {topic} site:scholar.google.com OR site:researchgate.net"
+            headers = {"X-API-KEY": serper_api_key, "Content-Type": "application/json"}
+            payload = {"q": search_query, "num": count}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://google.serper.dev/search",
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    data = await resp.json()
+
+            organic = data.get("organic", [])
+            if organic:
+                snippets = []
+                for r in organic[:count]:
+                    # Build a structured reference block
+                    title = r.get('title', 'Unknown Title')
+                    link = r.get('link', '#')
+                    snippet = r.get('snippet', '')
+                    snippets.append(f"Source: {title}\nURL: {link}\nAbstract/Snippet: {snippet}")
+                return "\n\n".join(snippets)
+                
+            return ""
+        except Exception as e:
+            logger.warning(f"Failed to fetch real academic sources: {str(e)}")
+            return ""
 
     async def perform_web_research(self, missing_item: str, context: str = "") -> str:
         """

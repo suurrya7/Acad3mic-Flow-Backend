@@ -6,6 +6,8 @@ from uuid import UUID
 class DocumentResponse(BaseModel):
     id: UUID
     filename: str
+    ai_summary: Optional[str] = None
+    ai_tag: Optional[str] = None
     created_at: datetime
 
 class AssignmentRequest(BaseModel):
@@ -20,4 +22,6 @@ class AssignmentResponse(BaseModel):
     output_text: Optional[str] = None
     missing_info_details: Optional[List[str]] = None
     error_message: Optional[str] = None
+    words_used: Optional[int] = None
+    self_similarity_score: Optional[float] = None
     created_at: datetime

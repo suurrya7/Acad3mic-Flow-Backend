@@ -1,0 +1,62 @@
+/Users/surya/Desktop/Latest/app/services/ai_service.py:3: FutureWarning: 
+
+All support for the `google.generativeai` package has ended. It will no longer be receiving 
+updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
+See README for more details:
+
+https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
+
+  import google.generativeai as genai
+2026-04-09 16:48:26,635 - asyncio - DEBUG - Using selector: KqueueSelector
+2026-04-09 16:48:26,636 - supabase - INFO - Initialized Admin Supabase Client (HTTP/1.1, RLS Bypass)
+2026-04-09 16:48:26,636 - app.services.blog_service - INFO - Requesting 4 new blog topics from AI
+2026-04-09 16:48:26,636 - acad3mic-flow - INFO - Sending AI Request: prompt_len=472 chars, timeout=60s
+2026-04-09 16:48:52,587 - httpcore.connection - DEBUG - connect_tcp.started host='xbvgyjbxjlqkchnrsrey.supabase.co' port=443 local_address=None timeout=5.0 socket_options=None
+2026-04-09 16:48:52,632 - httpcore.connection - DEBUG - connect_tcp.complete return_value=<httpcore._backends.sync.SyncStream object at 0x10ecb7620>
+2026-04-09 16:48:52,632 - httpcore.connection - DEBUG - start_tls.started ssl_context=<ssl.SSLContext object at 0x108f78ef0> server_hostname='xbvgyjbxjlqkchnrsrey.supabase.co' timeout=5.0
+2026-04-09 16:48:52,657 - httpcore.connection - DEBUG - start_tls.complete return_value=<httpcore._backends.sync.SyncStream object at 0x10ecc6350>
+2026-04-09 16:48:52,658 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2026-04-09 16:48:52,658 - httpcore.http11 - DEBUG - send_request_headers.complete
+2026-04-09 16:48:52,659 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2026-04-09 16:48:52,659 - httpcore.http11 - DEBUG - send_request_body.complete
+2026-04-09 16:48:52,659 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2026-04-09 16:48:52,768 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 201, b'Created', [(b'Date', b'Thu, 09 Apr 2026 11:18:52 GMT'), (b'Content-Type', b'application/json; charset=utf-8'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'Content-Range', b'*/*'), (b'CF-Ray', b'9e991d132f87aa20-DEL'), (b'CF-Cache-Status', b'DYNAMIC'), (b'Content-Encoding', b'gzip'), (b'Strict-Transport-Security', b'max-age=31536000; includeSubDomains; preload'), (b'Vary', b'Accept-Encoding'), (b'X-Content-Type-Options', b'nosniff'), (b'content-profile', b'public'), (b'preference-applied', b'return=representation'), (b'sb-gateway-version', b'1'), (b'sb-project-ref', b'xbvgyjbxjlqkchnrsrey'), (b'sb-request-id', b'019d71f7-6802-7619-92c2-ded82ec44d71'), (b'x-envoy-attempt-count', b'1'), (b'x-envoy-upstream-service-time', b'47'), (b'Set-Cookie', b'__cf_bm=fmbGbDKkjZVOrgq6zQb_BlOC_bSCtko2aKLOGePCM10-1775733532-1.0.1.1-eOfjaM7T9m9BoYKJ0XkNPkAGQM6FCBpf25oJasWJxoEMU80pN1WZSU6SFzpXaJyESgk3LHmj8exXkcVCjAlLRJrZtolWgosb01NQIsO2UjY; path=/; expires=Thu, 09-Apr-26 11:48:52 GMT; domain=.supabase.co; HttpOnly; Secure; SameSite=None'), (b'Server', b'cloudflare'), (b'alt-svc', b'h3=":443"; ma=86400')])
+2026-04-09 16:48:52,770 - httpx - INFO - HTTP Request: POST https://xbvgyjbxjlqkchnrsrey.supabase.co/rest/v1/blog_topics "HTTP/1.1 201 Created"
+2026-04-09 16:48:52,770 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2026-04-09 16:48:52,771 - httpcore.http11 - DEBUG - receive_response_body.complete
+2026-04-09 16:48:52,771 - httpcore.http11 - DEBUG - response_closed.started
+2026-04-09 16:48:52,771 - httpcore.http11 - DEBUG - response_closed.complete
+2026-04-09 16:48:52,774 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2026-04-09 16:48:52,775 - httpcore.http11 - DEBUG - send_request_headers.complete
+2026-04-09 16:48:52,775 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2026-04-09 16:48:52,775 - httpcore.http11 - DEBUG - send_request_body.complete
+2026-04-09 16:48:52,775 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2026-04-09 16:48:52,835 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 201, b'Created', [(b'Date', b'Thu, 09 Apr 2026 11:18:52 GMT'), (b'Content-Type', b'application/json; charset=utf-8'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'Content-Range', b'*/*'), (b'CF-Ray', b'9e991d13e8faaa20-DEL'), (b'CF-Cache-Status', b'DYNAMIC'), (b'Content-Encoding', b'gzip'), (b'Strict-Transport-Security', b'max-age=31536000; includeSubDomains; preload'), (b'Vary', b'Accept-Encoding'), (b'X-Content-Type-Options', b'nosniff'), (b'content-profile', b'public'), (b'preference-applied', b'return=representation'), (b'sb-gateway-version', b'1'), (b'sb-project-ref', b'xbvgyjbxjlqkchnrsrey'), (b'sb-request-id', b'019d71f7-6875-7b96-a7d1-ff4ba5ea2c25'), (b'x-envoy-attempt-count', b'1'), (b'x-envoy-upstream-service-time', b'7'), (b'Server', b'cloudflare'), (b'alt-svc', b'h3=":443"; ma=86400')])
+2026-04-09 16:48:52,836 - httpx - INFO - HTTP Request: POST https://xbvgyjbxjlqkchnrsrey.supabase.co/rest/v1/blog_topics "HTTP/1.1 201 Created"
+2026-04-09 16:48:52,836 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2026-04-09 16:48:52,836 - httpcore.http11 - DEBUG - receive_response_body.complete
+2026-04-09 16:48:52,836 - httpcore.http11 - DEBUG - response_closed.started
+2026-04-09 16:48:52,837 - httpcore.http11 - DEBUG - response_closed.complete
+2026-04-09 16:48:52,837 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2026-04-09 16:48:52,838 - httpcore.http11 - DEBUG - send_request_headers.complete
+2026-04-09 16:48:52,838 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2026-04-09 16:48:52,838 - httpcore.http11 - DEBUG - send_request_body.complete
+2026-04-09 16:48:52,838 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2026-04-09 16:48:52,897 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 201, b'Created', [(b'Date', b'Thu, 09 Apr 2026 11:18:52 GMT'), (b'Content-Type', b'application/json; charset=utf-8'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'Content-Range', b'*/*'), (b'CF-Ray', b'9e991d1449a3aa20-DEL'), (b'CF-Cache-Status', b'DYNAMIC'), (b'Content-Encoding', b'gzip'), (b'Strict-Transport-Security', b'max-age=31536000; includeSubDomains; preload'), (b'Vary', b'Accept-Encoding'), (b'X-Content-Type-Options', b'nosniff'), (b'content-profile', b'public'), (b'preference-applied', b'return=representation'), (b'sb-gateway-version', b'1'), (b'sb-project-ref', b'xbvgyjbxjlqkchnrsrey'), (b'sb-request-id', b'019d71f7-68b6-7065-b73a-748db3540147'), (b'x-envoy-attempt-count', b'1'), (b'x-envoy-upstream-service-time', b'3'), (b'Server', b'cloudflare'), (b'alt-svc', b'h3=":443"; ma=86400')])
+2026-04-09 16:48:52,897 - httpx - INFO - HTTP Request: POST https://xbvgyjbxjlqkchnrsrey.supabase.co/rest/v1/blog_topics "HTTP/1.1 201 Created"
+2026-04-09 16:48:52,897 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2026-04-09 16:48:52,898 - httpcore.http11 - DEBUG - receive_response_body.complete
+2026-04-09 16:48:52,898 - httpcore.http11 - DEBUG - response_closed.started
+2026-04-09 16:48:52,898 - httpcore.http11 - DEBUG - response_closed.complete
+2026-04-09 16:48:52,899 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2026-04-09 16:48:52,899 - httpcore.http11 - DEBUG - send_request_headers.complete
+2026-04-09 16:48:52,899 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2026-04-09 16:48:52,899 - httpcore.http11 - DEBUG - send_request_body.complete
+2026-04-09 16:48:52,899 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2026-04-09 16:48:52,957 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 201, b'Created', [(b'Date', b'Thu, 09 Apr 2026 11:18:52 GMT'), (b'Content-Type', b'application/json; charset=utf-8'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'Content-Range', b'*/*'), (b'CF-Ray', b'9e991d14aa91aa20-DEL'), (b'CF-Cache-Status', b'DYNAMIC'), (b'Content-Encoding', b'gzip'), (b'Strict-Transport-Security', b'max-age=31536000; includeSubDomains; preload'), (b'Vary', b'Accept-Encoding'), (b'X-Content-Type-Options', b'nosniff'), (b'content-profile', b'public'), (b'preference-applied', b'return=representation'), (b'sb-gateway-version', b'1'), (b'sb-project-ref', b'xbvgyjbxjlqkchnrsrey'), (b'sb-request-id', b'019d71f7-68f1-7406-9f18-0feadadde15a'), (b'x-envoy-attempt-count', b'1'), (b'x-envoy-upstream-service-time', b'4'), (b'Server', b'cloudflare'), (b'alt-svc', b'h3=":443"; ma=86400')])
+2026-04-09 16:48:52,957 - httpx - INFO - HTTP Request: POST https://xbvgyjbxjlqkchnrsrey.supabase.co/rest/v1/blog_topics "HTTP/1.1 201 Created"
+2026-04-09 16:48:52,958 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2026-04-09 16:48:52,958 - httpcore.http11 - DEBUG - receive_response_body.complete
+2026-04-09 16:48:52,958 - httpcore.http11 - DEBUG - response_closed.started
+2026-04-09 16:48:52,958 - httpcore.http11 - DEBUG - response_closed.complete
+Success: [{'id': '55d79d58-4e64-4438-b3d7-d3ec4eaca273', 'title': 'Mastering the Literature Review: A Step-by-Step Framework for PhD Success', 'status': 'pending', 'source': 'ai_generated', 'created_at': '2026-04-09T11:18:52.746195+00:00', 'updated_at': '2026-04-09T11:18:52.746195+00:00'}, {'id': 'fa1057f8-ae36-4d4c-bfb0-def374da2ef2', 'title': 'How to Use AI Responsibly: Avoiding Plagiarism While Enhancing Your Research Workflow', 'status': 'pending', 'source': 'ai_generated', 'created_at': '2026-04-09T11:18:52.834963+00:00', 'updated_at': '2026-04-09T11:18:52.834963+00:00'}, {'id': '51a94c96-28c9-4aa8-a8f9-cc0b7efc5bd5', 'title': 'Structuring Your Academic Thesis: A Proven Blueprint for Clarity and Cohesion', 'status': 'pending', 'source': 'ai_generated', 'created_at': '2026-04-09T11:18:52.89949+00:00', 'updated_at': '2026-04-09T11:18:52.89949+00:00'}, {'id': '76bf3f9c-eed2-4073-b5c7-0507554e4034', 'title': 'Advanced Research Methodologies: How to Streamline Data Synthesis with Acad3micFlow', 'status': 'pending', 'source': 'ai_generated', 'created_at': '2026-04-09T11:18:52.958503+00:00', 'updated_at': '2026-04-09T11:18:52.958503+00:00'}]

@@ -17,7 +17,7 @@ router = APIRouter(
     tags=["Assignments"]
 )
 
-async def process_assignment_task(assignment_id: str, user_id: str, topic: str, instructions: str, combined_docs_text: str):
+async def process_assignment_task(assignment_id: str, user_id: str, topic: str, instructions: str, combined_docs_text: str, file_uris: list = None):
     """
     Background task to process the academic assignment pipeline.
     Includes Intelligent Requirement Check, Interactive Pause (awaiting_info), 
@@ -25,9 +25,17 @@ async def process_assignment_task(assignment_id: str, user_id: str, topic: str, 
     """
     ai_service = get_ai_service()
     supabase = get_supabase_admin()
+
+    def _set_stage(stage: str):
+        """Helper: update progress_stage in DB silently."""
+        try:
+            supabase.table("assignments").update({"progress_stage": stage}).eq("id", assignment_id).execute()
+        except Exception as ex:
+            logger.warning(f"[{assignment_id}] Could not set progress_stage={stage}: {ex}")
     
     try:
-        # 1. Evaluate Data Sufficiency
+        # ── Stage 1: Validating requirements ──────────────────────────────────
+        _set_stage("validating")
         logger.info(f"[{assignment_id}] Checking data sufficiency...")
         sufficiency = await ai_service.evaluate_data_sufficiency(
             topic=topic,
@@ -42,49 +50,89 @@ async def process_assignment_task(assignment_id: str, user_id: str, topic: str, 
             reason = sufficiency.get("reason", "Incomplete data.")
             
             if action == "ask_user":
-                # Mark as AWAITING_INFO (not failed!) — the user can re-submit with more info
                 logger.warning(f"[{assignment_id}] Pausing — awaiting user info: {missing}")
                 supabase.table("assignments").update({
                     "status": "awaiting_info",
+                    "progress_stage": "awaiting_info",
                     "missing_info_details": missing,
                     "error_message": f"The AI needs more information: {reason}"
                 }).eq("id", assignment_id).execute()
-                return  # Pause cleanly — do not fail
+                return
             
             elif action == "search_web":
-                # Research each missing item live
+                # ── Stage 2a: Researching missing items ───────────────────────
+                _set_stage("researching")
                 logger.info(f"[{assignment_id}] Researching {len(missing)} missing items online...")
                 for item in missing:
                     research_res = await ai_service.perform_web_research(item, context=instructions)
                     researched_data += f"\n--- Online Research: {item} ---\n{research_res}\n"
 
-        # 2. Generate Content (with checkpoint-based resumption)
-        logger.info(f"[{assignment_id}] Starting assignment generation...")
+        # ── Stage 2b: Fetching verified academic citations ─────────────────────
+        _set_stage("researching")
+        logger.info(f"[{assignment_id}] Fetching verified academic citations...")
+        verified_sources = await ai_service.fetch_real_academic_sources(topic)
+        if verified_sources:
+            researched_data += f"\n\n--- VERIFIED ACADEMIC SOURCES ---\n{verified_sources}\n"
+
+        # ── Fetch User Writing Profile ─────────────────────────────────────────
+        profile_res = supabase.table("user_profiles").select("writing_profile").eq("id", user_id).single().execute()
+        writing_profile = profile_res.data.get("writing_profile", {}) if profile_res.data else {}
+
+        # ── Stage 3: Generating content ────────────────────────────────────────
+        _set_stage("generating")
+        logger.info(f"[{assignment_id}] Starting assignment generation (Profile: {writing_profile})...")
         
         final_text = await ai_service.generate_assignment(
             topic=topic,
             instructions=instructions,
             files_content=combined_docs_text,
             researched_data=researched_data,
-            assignment_id=assignment_id  # Enables per-section checkpointing
+            assignment_id=assignment_id,
+            file_uris=file_uris,
+            writing_profile=writing_profile
         )
         
         logger.info(f"[{assignment_id}] Generation complete. Words: {len(final_text.split())}")
         
-        # 3. Save completed output
-        supabase.table("assignments").update({
-            "status": "completed",
-            "output_text": final_text,
-            "error_message": None,
-            "missing_info_details": None
-        }).eq("id", assignment_id).execute()
-        
-        # 4. Deduct words (non-fatal if it fails)
+        # ── Self-Similarity Check ─────────────────────────────────────────────
+        try:
+            # Fetch last 5 assignments from the user
+            past_res = supabase.table("assignments").select("output_text").eq("user_id", user_id).neq("id", assignment_id).neq("status", "failed").order("created_at", desc=True).limit(5).execute()
+            if past_res.data:
+                past_texts = [row["output_text"] for row in past_res.data if row.get("output_text")]
+                if past_texts:
+                    from app.utils.similarity import get_max_similarity
+                    sim_score = get_max_similarity(final_text, past_texts)
+                    logger.info(f"[{assignment_id}] Self-similarity score: {sim_score:.2f}")
+                else:
+                    sim_score = 0.0
+            else:
+                sim_score = 0.0
+        except Exception as sim_err:
+            logger.warning(f"[{assignment_id}] Similarity check failed: {sim_err}")
+            sim_score = None
+
+        # 5. Deduct words (non-fatal)
         try:
             word_count = len(final_text.split())
             user_service.deduct_words(user_id, word_count)
         except Exception as deduct_err:
             logger.warning(f"[{assignment_id}] Word deduction failed: {str(deduct_err)}")
+            word_count = 0
+
+        # ── Stage 4: Saving – stream-refine is triggered by client next ────────
+        _set_stage("ready_to_refine")
+        update_payload = {
+            "status": "completed",
+            "output_text": final_text,
+            "error_message": None,
+            "missing_info_details": None,
+            "words_used": word_count
+        }
+        if sim_score is not None:
+            update_payload["self_similarity_score"] = float(sim_score)
+            
+        supabase.table("assignments").update(update_payload).eq("id", assignment_id).execute()
         
     except Exception as e:
         import traceback
@@ -121,13 +169,16 @@ async def submit_assignment(
          
     # 2. Gather Document Content
     combined_docs_text = ""
+    file_uris = []
     if request_data.document_ids:
         doc_ids_str = [str(did) for did in request_data.document_ids]
-        docs_res = supabase.table("documents").select("content_extracted").in_("id", doc_ids_str).eq("user_id", user_id).execute()
+        docs_res = supabase.table("documents").select("content_extracted, gemini_file_uri").in_("id", doc_ids_str).eq("user_id", user_id).execute()
         
         for doc in docs_res.data:
             if doc.get("content_extracted"):
                 combined_docs_text += doc["content_extracted"] + "\n\n"
+            if doc.get("gemini_file_uri"):
+                file_uris.append(doc["gemini_file_uri"])
                 
     # 3. Create Assignment Record (Processing)
     assignment_data = {
@@ -150,10 +201,65 @@ async def submit_assignment(
         user_id,
         request_data.topic,
         request_data.instructions,
-        combined_docs_text
+        combined_docs_text,
+        file_uris
     )
     
     return assignment
+
+
+@router.get("/{assignment_id}/stream-refine")
+async def stream_refined_content(
+    assignment_id: UUID,
+    token: str = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    SSE endpoint that streams refined content for a completed assignment.
+    Supports 'token' as a query param because EventSource cannot send headers.
+    """
+    from fastapi.responses import StreamingResponse
+    from app.services.ai_service import get_ai_service
+
+    supabase = get_supabase_admin()
+    user_id = current_user["id"]
+
+    # Fetch the completed assignment output
+    res = supabase.table("assignments").select("output_text, status").eq("id", str(assignment_id)).eq("user_id", user_id).single().execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    data = res.data
+    if data.get("status") != "completed" or not data.get("output_text"):
+        raise HTTPException(status_code=400, detail="Assignment is not completed yet or has no output.")
+
+    raw_text = data["output_text"]
+    ai_service = get_ai_service()
+
+    async def event_generator():
+        try:
+            supabase.table("assignments").update({"progress_stage": "refining"}).eq("id", str(assignment_id)).execute()
+
+            async for tok in ai_service.refine_content_stream(raw_text):
+                safe = tok.replace("\n", "\\n")
+                yield f"data: {safe}\n\n"
+
+            supabase.table("assignments").update({"progress_stage": "done"}).eq("id", str(assignment_id)).execute()
+            yield "data: [DONE]\n\n"
+
+        except Exception as e:
+            logger.error(f"SSE stream error for {assignment_id}: {str(e)}")
+            yield f"data: [ERROR] {str(e)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
 
 @router.get("/{assignment_id}", response_model=AssignmentResponse)
 async def get_assignment(assignment_id: UUID, current_user: dict = Depends(get_current_user)):
