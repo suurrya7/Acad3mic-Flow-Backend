@@ -926,28 +926,32 @@ class AIService:
         import json
         
         system_prompt = """
-        You are an Academic Integrity & Data Sufficiency validator.
-        Your job is to determine if the provided assignment topic, instructions, and documents are enough to generate a high-quality (Distinction/A+) response.
+        You are an Academic Data Sufficiency validator.
+        Your job is to determine if the provided assignment topic, instructions, and reference documents contain enough information to generate a high-quality response.
         
-        Check for:
-        1. Specific Datasets: Are there mentions of files/CSV/Excel data that are NOT in the reference content?
-        2. Proprietary Case Studies: Does it mention a specific company/scenario that isn't fully described?
-        3. Missing Rubrics: Is a specific marking scheme mentioned but not provided?
-        4. Ambiguous Quotas: Is the word count or formatting missing?
+        CRITICAL RULES:
+        1. If the user has uploaded reference documents (shown under REFERENCE CONTENT), treat them as a COMPLETE assignment brief. The user has already provided everything they intend to provide. DO NOT ask for more.
+        2. Only flag something as missing if it is ABSOLUTELY IMPOSSIBLE to proceed without it (e.g., a specific dataset file like "data.csv" is referenced but not provided).
+        3. Never flag missing rubrics, word counts, or formatting — the AI can infer reasonable defaults.
+        4. Never flag general research topics as missing — the AI can research those itself.
+        5. When in doubt, mark as SUFFICIENT. It is better to proceed and produce output than to block the user.
         
         OUTPUT FORMAT (STRICT JSON):
         {
             "is_sufficient": true/false,
-            "missing_items": ["Item 1", "Item 2"],
+            "missing_items": ["Item 1"],
             "suggested_action": "ask_user" | "search_web" | "none",
             "reason": "Brief explanation"
         }
         
-        Note: If the item can be found on Kaggle, Google Scholar, or official websites, suggest "search_web". 
-        If it requires a personal/university-private file, suggest "ask_user".
+        DEFAULT to {"is_sufficient": true} unless something critical is truly impossible to work without.
         """
         
-        user_prompt = f"TOPIC: {topic}\nINSTRUCTIONS: {instructions}\n\nREFERENCE CONTENT PROVIDED:\n{files_content[:5000]}"
+        # Pass more content (up to 15k chars) for better context
+        content_preview = files_content[:15000] if files_content else "(No reference documents uploaded)"
+        has_docs = bool(files_content and files_content.strip())
+        
+        user_prompt = f"TOPIC: {topic}\nINSTRUCTIONS: {instructions}\n\nUSER UPLOADED DOCUMENTS: {'YES' if has_docs else 'NO'}\n\nREFERENCE CONTENT PROVIDED:\n{content_preview}"
         
         try:
             response = await self.generate_content(
@@ -960,8 +964,20 @@ class AIService:
             json_str = response.strip()
             if "```json" in json_str:
                 json_str = json_str.split("```json")[1].split("```")[0].strip()
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0].strip()
             
             result = json.loads(json_str)
+            
+            # Safety override: if user uploaded documents, bias heavily towards sufficient
+            if has_docs and not result.get("is_sufficient", True):
+                missing = result.get("missing_items", [])
+                # Only block if there's a specific file/dataset reference that's truly missing
+                critical_missing = [m for m in missing if any(kw in m.lower() for kw in ["dataset", "csv", "excel", "spreadsheet", "data file", ".xlsx", ".csv"])]
+                if not critical_missing:
+                    logger.info(f"Sufficiency check flagged items but user uploaded docs — overriding to sufficient. Items: {missing}")
+                    return {"is_sufficient": True, "missing_items": [], "suggested_action": "none", "reason": "User-provided documents treated as complete brief."}
+            
             return result
         except Exception as e:
             logger.error(f"Data sufficiency check failed: {str(e)}")
