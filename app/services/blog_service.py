@@ -28,9 +28,14 @@ class BlogService:
     async def generate_topics(self) -> List[Dict]:
         """Ask AI to generate 4 new academic writing blog topics"""
         prompt = (
-            "You are an expert SEO content strategist for an AI Academic Writing Assistant called Acad3micFlow. "
-            "Generate 4 highly engaging, SEO-optimized blog topics designed to attract college students, PhD candidates, and researchers. "
-            "Topics should cover things like: writing better literature reviews, avoiding plagiarism, structuring essays, or academic research methodologies. "
+            "You are an expert SEO content strategist and academic writing consultant for an AI Academic Writing Assistant called Acad3micFlow (acad3micflow.space). "
+            "Before generating topics, internally simulate a keyword research process: identify high-volume, low-to-medium competition keywords in the academic writing niche; prioritize informational intent queries (e.g. 'how to write a literature review', 'best AI tools for PhD students'); consider long-tail keywords targeting pain points like essay deadlines, citation confusion, dissertation structure, research methodology, and plagiarism. "
+            "Factor in trending 2024–2026 academic search terms such as: 'AI tools for academic writing', 'ChatGPT for research papers', 'AI literature review generator', 'PhD productivity tools', and 'academic writing with AI'. "
+            "Analyze content gaps versus competitor blogs like Scribbr, Grammarly Blog, PaperPal, and Quillbot — then generate angles they have NOT fully covered. "
+            "Generate exactly 4 highly engaging, SEO-optimized blog titles designed to attract college students, PhD candidates, and researchers. "
+            "Each title must: (1) contain at least one searchable keyword phrase, (2) address a specific academic writing pain point, (3) use a high-CTR structure such as How-To, Numbered List, Ultimate Guide, or Question format, (4) subtly position AI assistance as part of the solution without sounding spammy, (5) be 70 characters or fewer so Google does not truncate it. "
+            "At least 2 titles must target PhD or postgraduate audience specifically. At least 1 title must reference AI tools or AI-assisted writing. "
+            "Do NOT generate generic titles like 'Tips for Better Academic Writing'. Titles must feel written for real students, not corporate marketers. "
             "Return ONLY a JSON array of strings containing the 4 titles, with no markdown formatting or extra text."
         )
         

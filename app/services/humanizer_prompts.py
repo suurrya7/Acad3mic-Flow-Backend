@@ -50,13 +50,13 @@ PASS 3 — HUMAN IMPERFECTION LAYER (Simple Academic Tone)
 Using Pass 2 output, add human imperfections.
 Rules:
 Reduce grammar quality below 80% while staying readable.
-Add about 10% natural human errors:
+Add about 07% natural human errors:
 - small grammar slips
 - informal phrasing
 - uneven flow
 Add about 05% spelling variations or abbreviations:
-- common spelling mistakes
-- casual abbreviations (e.g., “govt”, “ppl”, “esp”) 2%
+- 02% common spelling mistakes
+- 02% casual abbreviations (e.g., “govt”, “ppl”, “esp”)
 
 Do not make obvious or repeated mistakes.
 Do not break sentence starts or endings.
