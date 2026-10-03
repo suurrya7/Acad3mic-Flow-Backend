@@ -68,7 +68,9 @@ if settings.ENV == "production":
         ".onrender.com",  # Allows all subdomains on Render
         "*.onrender.com",
         ".koyeb.app",     # Allows all subdomains on Koyeb
-        "*.koyeb.app"
+        "*.koyeb.app",
+        ".hf.space",      # Allows all subdomains on Hugging Face Spaces
+        "*.hf.space"
     ])
     
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
