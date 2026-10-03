@@ -97,9 +97,9 @@ class Settings(BaseSettings):
     PAYU_SALT: str
     
     ENV: str = "development"
-    PROD_ORIGINS: str = "http://localhost:5173,https://acad3micflow.space" # Comma separated origins for CORS
+    PROD_ORIGINS: str = "http://localhost:5173,https://acad3micflow.space,https://app.acad3micflow.space" # Comma separated origins for CORS
     API_BASE_URL: str = "http://localhost:8000"  # Base URL for webhooks and callbacks
-    FRONTEND_URL: str = "http://localhost:5173"  # Used for password reset redirect links
+    FRONTEND_URL: str = "https://app.acad3micflow.space"  # Used for password reset redirect links
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 

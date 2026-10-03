@@ -47,10 +47,14 @@ if settings.ENV == "development":
 else:
     # Parse valid origins from config
     origins = [origin.strip() for origin in settings.PROD_ORIGINS.split(",") if origin.strip()]
+    for extra in ["https://acad3micflow.space", "https://app.acad3micflow.space"]:
+        if extra not in origins:
+            origins.append(extra)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"https://.*\.acad3micflow\.space",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -67,6 +71,9 @@ if settings.ENV == "production":
         "127.0.0.1",
         ".onrender.com",  # Allows all subdomains on Render
         "*.onrender.com",
+        ".acad3micflow.space",  # Allows all subdomains on acad3micflow.space
+        "*.acad3micflow.space",
+        "acad3micflow.space",
         ".koyeb.app",     # Allows all subdomains on Koyeb
         "*.koyeb.app",
         ".hf.space",      # Allows all subdomains on Hugging Face Spaces
