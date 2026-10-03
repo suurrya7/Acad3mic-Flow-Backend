@@ -51,11 +51,14 @@ class GradingReport(BaseModel):
     criterion_results: List[GradingCriterionResult]
     examiner_comments: str
     improvement_suggestions: List[str]
+    grade_gap_analysis: Optional[List[str]] = None
+    rubric_table_markdown: Optional[str] = None
     
     # Metadata/Stats
     word_count: int
     referencing_style_detected: str
     citation_count: int
+    citation_quality_metrics: Optional[Dict[str, Any]] = None
     
     created_at: Optional[datetime] = None
 

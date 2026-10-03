@@ -19,9 +19,22 @@ class AssignmentResponse(BaseModel):
     id: UUID
     title: str
     status: str
+    progress_stage: Optional[str] = None
+    completed_chunks: Optional[int] = None
+    total_chunks: Optional[int] = None
     output_text: Optional[str] = None
     missing_info_details: Optional[List[str]] = None
     error_message: Optional[str] = None
     words_used: Optional[int] = None
     self_similarity_score: Optional[float] = None
+    created_at: datetime
+
+class AssignmentChunkResponse(BaseModel):
+    id: UUID
+    assignment_id: UUID
+    chunk_index: int
+    heading: str
+    content: str
+    target_words: Optional[int] = None
+    is_humanized: Optional[bool] = False
     created_at: datetime

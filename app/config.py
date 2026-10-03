@@ -52,6 +52,28 @@ class TierAllocation:
             "Second Class": (50, 59),
             "Pass": (35, 49),
             "Fail": (0, 34)
+        },
+        "USA": {
+            "A (Excellent, 3.7-4.0 GPA)": (90, 100),
+            "B (Good, 2.7-3.3 GPA)": (80, 89),
+            "C (Satisfactory, 1.7-2.3 GPA)": (70, 79),
+            "D (Passing, 1.0 GPA)": (60, 69),
+            "F (Fail, 0.0 GPA)": (0, 59)
+        },
+        "Canada": {
+            "A+ / A (Excellent)": (85, 100),
+            "A- / B+ (Very Good)": (75, 84),
+            "B / B- (Good)": (65, 74),
+            "C+ / C (Satisfactory)": (55, 64),
+            "D (Marginal Pass)": (50, 54),
+            "F (Fail)": (0, 49)
+        },
+        "South Africa": {
+            "First Class (1)": (75, 100),
+            "Second Class Division 1 (2.1)": (70, 74),
+            "Second Class Division 2 (2.2)": (60, 69),
+            "Third Class (3)": (50, 59),
+            "Fail (F)": (0, 49)
         }
     }
 
@@ -62,7 +84,7 @@ class Settings(BaseSettings):
     SUPABASE_JWT_SECRET: str
     
     GEMINI_API_KEY: str
-    GEMINI_MODEL_NAME: str = "models/gemini-3.1-flash-lite-preview"
+    GEMINI_MODEL_NAME: str = "models/gemini-3.5-flash-lite"
     
     # Optional: Serper.dev API key for live scholarly research
     # If not set, falls back to LLM internal knowledge

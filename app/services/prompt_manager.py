@@ -12,13 +12,27 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+import time
+
 class PromptManager:
     def __init__(self):
         self.supabase = get_supabase_admin()
         self.ai_service = AIService()
-    
+        self._cached_active_prompt: Optional[Dict] = None
+        self._cache_timestamp: float = 0.0
+        self._cache_ttl: float = 300.0  # 5 minutes TTL
+
+    def _invalidate_cache(self):
+        """Invalidate the in-memory prompt cache"""
+        self._cached_active_prompt = None
+        self._cache_timestamp = 0.0
+
     async def get_active_prompt(self) -> Dict:
-        """Get currently active humanizer prompt"""
+        """Get currently active humanizer prompt (with in-memory TTL caching)"""
+        now = time.time()
+        if self._cached_active_prompt and (now - self._cache_timestamp < self._cache_ttl):
+            return self._cached_active_prompt
+
         try:
             result = self.supabase.table("humanizer_prompts")\
                 .select("*")\
@@ -27,11 +41,13 @@ class PromptManager:
                 .execute()
             
             if result.data:
+                self._cached_active_prompt = result.data
+                self._cache_timestamp = now
                 return result.data
             
             # If no active prompt in database, return default from humanizer_prompts.py
             from app.services.humanizer_prompts import HUMANIZER_SYSTEM_PROMPT
-            return {
+            default_prompt = {
                 "id": "default",
                 "version": 1,
                 "prompt_text": HUMANIZER_SYSTEM_PROMPT,
@@ -39,10 +55,13 @@ class PromptManager:
                 "created_at": datetime.utcnow().isoformat(),
                 "notes": "Default prompt from code"
             }
+            self._cached_active_prompt = default_prompt
+            self._cache_timestamp = now
+            return default_prompt
         except Exception as e:
             # If query fails (e.g., no active prompt), return default
             from app.services.humanizer_prompts import HUMANIZER_SYSTEM_PROMPT
-            return {
+            default_prompt = {
                 "id": "default",
                 "version": 1,
                 "prompt_text": HUMANIZER_SYSTEM_PROMPT,
@@ -50,6 +69,9 @@ class PromptManager:
                 "created_at": datetime.utcnow().isoformat(),
                 "notes": "Default prompt from code"
             }
+            self._cached_active_prompt = default_prompt
+            self._cache_timestamp = now
+            return default_prompt
     
     async def list_prompts(self) -> List[Dict]:
         """List all prompt versions"""
@@ -146,6 +168,7 @@ class PromptManager:
             }).execute()
             
             logger.info(f"Created prompt version {next_version}")
+            self._invalidate_cache()
             return result.data[0]
         except Exception as e:
             logger.error(f"Failed to create prompt: {str(e)}")
@@ -177,6 +200,7 @@ class PromptManager:
                 'target_id_val': prompt_id
             }).execute()
             
+            self._invalidate_cache()
             logger.info(f"Activated prompt {prompt_id}")
             return result.data[0]
         except HTTPException:
@@ -236,6 +260,7 @@ class PromptManager:
                 'details_val': {'version': prompt.get('version')}
             }).execute()
             
+            self._invalidate_cache()
             logger.info(f"Deleted prompt {prompt_id}")
             return {"success": True, "message": "Prompt deleted"}
         except HTTPException:

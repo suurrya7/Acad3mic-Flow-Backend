@@ -1,12 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
+from fastapi.responses import Response, StreamingResponse
 import logging
+import asyncio
+import json
 from app.dependencies import get_current_user
 from app.services.ai_service import get_ai_service
 from app.services.user_service import user_service
 from app.db.supabase import get_supabase_admin
-from app.models.assignment import AssignmentRequest, AssignmentResponse
+from app.models.assignment import AssignmentRequest, AssignmentResponse, AssignmentChunkResponse
 from app.models.grading import GradingRequest, GradingResponse
 from app.services.grading_service import get_grading_service
+from app.services.citation_validator import get_citation_validator
+from app.services.document_export import get_docx_exporter
 from app.limiter import limiter
 from uuid import UUID
 
@@ -21,7 +26,7 @@ async def process_assignment_task(assignment_id: str, user_id: str, topic: str, 
     """
     Background task to process the academic assignment pipeline.
     Includes Intelligent Requirement Check, Interactive Pause (awaiting_info), 
-    Live Web Research, and Checkpoint-based resumption.
+    Live Web Research, Bounded Parallel Chunk Generation, DOI Validation, and Checkpoint-based resumption.
     """
     ai_service = get_ai_service()
     supabase = get_supabase_admin()
@@ -78,10 +83,15 @@ async def process_assignment_task(assignment_id: str, user_id: str, topic: str, 
         profile_res = supabase.table("user_profiles").select("writing_profile").eq("id", user_id).single().execute()
         writing_profile = profile_res.data.get("writing_profile", {}) if profile_res.data else {}
 
-        # ── Stage 3: Generating content ────────────────────────────────────────
+        # ── Stage 3: Generating content with Parallel Bounded Chunks ──────────
         _set_stage("generating")
         logger.info(f"[{assignment_id}] Starting assignment generation (Profile: {writing_profile})...")
         
+        async def on_chunk_complete(chunk_idx: int, total_chunks: int, heading: str):
+            stage_str = f"writing_section_{chunk_idx + 1}_of_{total_chunks}"
+            _set_stage(stage_str)
+            logger.info(f"[{assignment_id}] Completed section {chunk_idx + 1}/{total_chunks}: '{heading}'")
+
         final_text = await ai_service.generate_assignment(
             topic=topic,
             instructions=instructions,
@@ -89,12 +99,23 @@ async def process_assignment_task(assignment_id: str, user_id: str, topic: str, 
             researched_data=researched_data,
             assignment_id=assignment_id,
             file_uris=file_uris,
-            writing_profile=writing_profile
+            writing_profile=writing_profile,
+            on_chunk_complete=on_chunk_complete
         )
         
         logger.info(f"[{assignment_id}] Generation complete. Words: {len(final_text.split())}")
+
+        # ── Stage 3b: DOI / CrossRef Citation Validation ──────────────────────
+        _set_stage("verifying_citations")
+        try:
+            validator = get_citation_validator()
+            final_text, cit_stats = await validator.validate_document_citations(final_text)
+            logger.info(f"[{assignment_id}] Citation validation complete: {cit_stats}")
+        except Exception as cit_err:
+            logger.warning(f"[{assignment_id}] Citation validation skipped: {cit_err}")
         
-        # ── Self-Similarity Check ─────────────────────────────────────────────
+        # ── Stage 3c: Self-Similarity Check ───────────────────────────────────
+        _set_stage("checking_similarity")
         try:
             # Fetch last 5 assignments from the user
             past_res = supabase.table("assignments").select("output_text").eq("user_id", user_id).neq("id", assignment_id).neq("status", "failed").order("created_at", desc=True).limit(5).execute()
@@ -124,6 +145,7 @@ async def process_assignment_task(assignment_id: str, user_id: str, topic: str, 
         _set_stage("ready_to_refine")
         update_payload = {
             "status": "completed",
+            "progress_stage": "ready_to_refine",
             "output_text": final_text,
             "error_message": None,
             "missing_info_details": None,
@@ -271,7 +293,162 @@ async def get_assignment(assignment_id: UUID, current_user: dict = Depends(get_c
     if not res.data:
         raise HTTPException(status_code=404, detail="Assignment not found")
         
-    return res.data
+    data = res.data
+    # Compute completed chunks count for client polling / reconnection
+    try:
+        chunks_res = supabase.table("assignment_chunks").select("chunk_index", count="exact").eq("assignment_id", str(assignment_id)).execute()
+        data["completed_chunks"] = chunks_res.count if chunks_res.count is not None else len(chunks_res.data or [])
+    except Exception:
+        data["completed_chunks"] = 0
+
+    return data
+
+@router.get("/{assignment_id}/chunks", response_model=list[AssignmentChunkResponse])
+async def get_assignment_chunks(assignment_id: UUID, current_user: dict = Depends(get_current_user)):
+    """
+    Returns all saved assignment chunks for live preview or resumption.
+    """
+    supabase = get_supabase_admin()
+    user_id = current_user["id"]
+
+    # Verify ownership
+    res = supabase.table("assignments").select("id").eq("id", str(assignment_id)).eq("user_id", user_id).single().execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    chunks_res = supabase.table("assignment_chunks")\
+        .select("*")\
+        .eq("assignment_id", str(assignment_id))\
+        .order("chunk_index", desc=False)\
+        .execute()
+
+    return chunks_res.data or []
+
+@router.get("/{assignment_id}/progress-stream")
+async def stream_assignment_progress(
+    assignment_id: UUID,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    SSE endpoint that streams real-time assignment progress and chunk events.
+    Supports ?token=... query param for EventSource connections.
+    """
+    supabase = get_supabase_admin()
+    user_id = current_user["id"]
+
+    # Verify ownership
+    res = supabase.table("assignments").select("id, status, progress_stage").eq("id", str(assignment_id)).eq("user_id", user_id).single().execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    async def event_generator():
+        last_stage = None
+        last_chunks_count = -1
+        poll_count = 0
+        max_polls = 600  # 10 minutes max duration
+
+        try:
+            while poll_count < max_polls:
+                poll_count += 1
+                curr_res = supabase.table("assignments")\
+                    .select("status, progress_stage, error_message, missing_info_details")\
+                    .eq("id", str(assignment_id))\
+                    .single()\
+                    .execute()
+
+                if not curr_res.data:
+                    yield f"data: {json.dumps({'error': 'Assignment not found'})}\n\n"
+                    break
+
+                curr = curr_res.data
+                status = curr.get("status")
+                stage = curr.get("progress_stage") or "queued"
+
+                chunks_count = 0
+                try:
+                    c_res = supabase.table("assignment_chunks").select("chunk_index", count="exact").eq("assignment_id", str(assignment_id)).execute()
+                    chunks_count = c_res.count if c_res.count is not None else len(c_res.data or [])
+                except Exception:
+                    pass
+
+                if stage != last_stage or chunks_count != last_chunks_count or (poll_count % 5 == 0):
+                    last_stage = stage
+                    last_chunks_count = chunks_count
+                    payload = {
+                        "assignment_id": str(assignment_id),
+                        "status": status,
+                        "progress_stage": stage,
+                        "completed_chunks": chunks_count,
+                        "error_message": curr.get("error_message"),
+                        "missing_info_details": curr.get("missing_info_details")
+                    }
+                    yield f"data: {json.dumps(payload)}\n\n"
+
+                if status in ["completed", "failed", "awaiting_info"]:
+                    yield "data: [DONE]\n\n"
+                    break
+
+                await asyncio.sleep(1.0)
+        except Exception as e:
+            logger.error(f"Progress SSE error for {assignment_id}: {str(e)}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
+
+@router.get("/{assignment_id}/export-docx")
+async def export_assignment_docx(
+    assignment_id: UUID,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Generates and downloads a university-grade formatted Word (.docx) document
+    complete with Cover Page, Times New Roman 12pt, 1.5 spacing, 1-inch margins,
+    and hanging indent references. Supports ?token=... for window.open downloads.
+    """
+    supabase = get_supabase_admin()
+    user_id = current_user["id"]
+
+    res = supabase.table("assignments").select("title, output_text, status, created_at").eq("id", str(assignment_id)).eq("user_id", user_id).single().execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    data = res.data
+    if data.get("status") != "completed" or not data.get("output_text"):
+        raise HTTPException(status_code=400, detail="Assignment is not yet completed or has no content to export.")
+
+    title = data.get("title") or "Academic Assignment"
+    content = data.get("output_text")
+
+    user_email = current_user.get("email", "Student Submission")
+    exporter = get_docx_exporter()
+    docx_stream = exporter.generate_docx(
+        title=title,
+        content_markdown=content,
+        student_name=user_email,
+        course_name="Coursework Submission"
+    )
+
+    clean_filename = "".join(c for c in title if c.isalnum() or c in (' ', '_', '-')).rstrip()[:50]
+    filename = f"{clean_filename or 'Assignment'}.docx"
+
+    return Response(
+        content=docx_stream.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-cache"
+        }
+    )
 
 @router.get("/", response_model=list[AssignmentResponse])
 async def list_assignments(current_user: dict = Depends(get_current_user)):

@@ -25,6 +25,14 @@ class AIService:
         # Always get fresh settings to ensure we pick up environment overrides
         current_settings = get_settings()
         self.model = genai.GenerativeModel(current_settings.GEMINI_MODEL_NAME)
+        self._http_client = None
+
+    async def get_http_client(self):
+        """Persistent HTTP client with connection pooling"""
+        import httpx
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(timeout=15.0)
+        return self._http_client
 
     async def upload_to_gemini_files(self, file_bytes: bytes, mime_type: str, filename: str) -> str:
         """
@@ -404,10 +412,20 @@ class AIService:
         
         return {"format": citation_format, "count": ref_count}
 
-    async def generate_assignment(self, topic: str, instructions: str, files_content: str = "", researched_data: str = "", assignment_id: str = None, file_uris: list = None, writing_profile: dict = None) -> str:
+    async def generate_assignment(
+        self, 
+        topic: str, 
+        instructions: str, 
+        files_content: str = "", 
+        researched_data: str = "", 
+        assignment_id: str = None, 
+        file_uris: list = None, 
+        writing_profile: dict = None,
+        on_chunk_complete = None
+    ) -> str:
         """
         Generates the initial academic content before refinement.
-        Uses a chunk-based strategy to enforce accurate word counts and instruction adherence.
+        Uses a parallel chunk-based strategy (Semaphore=2) to enforce accurate word counts and high speed.
         """
         import json
         import math
@@ -512,11 +530,12 @@ class AIService:
             ]
             
         # ---------------------------------------------------------
-        # PHASE 2: Iterative Chunk Generation
+        # PHASE 2: Bounded Parallel Chunk Generation (Semaphore=2)
         # ---------------------------------------------------------
-        full_academic_text = ""
-        
-        for index, section in enumerate(sections):
+        results = {}  # {index: (heading, content)}
+        total_secs = len(sections)
+
+        async def generate_single_chunk(index: int, section: dict, preceding_citations_hint: str = ""):
             heading = section.get("heading", f"Section {index+1}")
             focus = section.get("focus", "Discuss the required topic.")
             target_words = section.get("target_words", 500)
@@ -524,6 +543,25 @@ class AIService:
             # Determine if this is the References section
             is_references_section = heading.lower() in ["references", "bibliography", "works cited", "reference list"]
             
+            # --- Checkpoint Check: If resuming, check if chunk already exists in DB ---
+            if assignment_id:
+                try:
+                    from app.db.supabase import get_supabase_admin
+                    supabase = get_supabase_admin()
+                    existing = supabase.table("assignment_chunks") \
+                        .select("content") \
+                        .eq("assignment_id", assignment_id) \
+                        .eq("chunk_index", index) \
+                        .execute()
+                    if existing.data and existing.data[0].get("content"):
+                        logger.info(f"Resuming: chunk {index} ('{heading}') already exists.")
+                        results[index] = (heading, existing.data[0]['content'])
+                        if on_chunk_complete:
+                            await on_chunk_complete(index, total_secs, heading)
+                        return
+                except Exception as ex_db:
+                    logger.warning(f"Error checking existing chunk {index}: {ex_db}")
+
             if is_references_section:
                 chunk_system_prompt = f"""
                 You are an Academic Reference Compiler.
@@ -574,6 +612,9 @@ class AIService:
             SECTION FOCUS: {focus}
             MANDATORY WORD COUNT FOR THIS SECTION: {target_words} words.
             """
+
+            if is_references_section and preceding_citations_hint:
+                chunk_user_prompt += f"\n\nPRECEDING SECTIONS FOR CITATION EXTRACTION:\n{preceding_citations_hint[:8000]}"
             
             if files_content:
                 chunk_user_prompt += f"\n\nReference Material (Full Content):\n{files_content}"
@@ -581,42 +622,30 @@ class AIService:
             if researched_data:
                 chunk_user_prompt += f"\n\nACADEMIC SOURCES FROM LIVE RESEARCH (You MUST cite these using in-text citations):\n{researched_data}"
                 
-            # Combine text strings into one and prepare the prompt parts
             chunk_prompt_parts = []
             if gemini_files:
                 chunk_prompt_parts.extend(gemini_files)
             chunk_prompt_parts.append(chunk_user_prompt)
 
-            # Generate the specific section (with checkpoint support)
             try:
-                # --- If assignment_id provided, check if chunk already exists (resumption) ---
-                if assignment_id:
-                    from app.db.supabase import get_supabase_admin
-                    supabase = get_supabase_admin()
-                    existing = supabase.table("assignment_chunks") \
-                        .select("content") \
-                        .eq("assignment_id", assignment_id) \
-                        .eq("chunk_index", index) \
-                        .execute()
-                    if existing.data:
-                        logger.info(f"Resuming: chunk {index} ('{heading}') already exists.")
-                        full_academic_text += f"\n\n# {heading}\n\n{existing.data[0]['content']}"
-                        continue  # Skip AI call for this section
-
                 section_text = await self.generate_content(
                     chunk_prompt_parts, 
                     system_instruction=chunk_system_prompt, 
                     timeout=120
                 )
+                clean_text = section_text.strip()
+                results[index] = (heading, clean_text)
                 
-                # --- Checkpoint: save section to DB immediately ---
+                # Checkpoint: save section to DB immediately
                 if assignment_id:
                     try:
+                        from app.db.supabase import get_supabase_admin
+                        supabase = get_supabase_admin()
                         supabase.table("assignment_chunks").upsert({
                             "assignment_id": assignment_id,
                             "chunk_index": index,
                             "heading": heading,
-                            "content": section_text.strip(),
+                            "content": clean_text,
                             "target_words": target_words,
                             "is_humanized": False
                         }, on_conflict="assignment_id,chunk_index").execute()
@@ -624,24 +653,56 @@ class AIService:
                     except Exception as db_err:
                         logger.warning(f"Failed to checkpoint chunk {index}: {str(db_err)}")
 
-                # Append to full document
-                full_academic_text += f"\n\n# {heading}\n\n{section_text.strip()}"
-                
+                if on_chunk_complete:
+                    try:
+                        await on_chunk_complete(index, total_secs, heading)
+                    except Exception as cb_err:
+                        logger.warning(f"on_chunk_complete callback error: {cb_err}")
+
             except Exception as e:
                 logger.error(f"Failed to generate section {heading}: {str(e)}")
-                full_academic_text += f"\n\n# {heading}\n\n[Generation failed for this section due to technical error.]"
+                results[index] = (heading, "[Generation failed for this section due to technical error.]")
 
-            # Rate limit protection between chunks
-            await asyncio.sleep(2)
+        # Scheduling:
+        if total_secs <= 2:
+            for idx, sec in enumerate(sections):
+                await generate_single_chunk(idx, sec)
+        else:
+            # 1. Section 0 (Introduction) first to establish the foundation
+            await generate_single_chunk(0, sections[0])
             
+            # Check if last section is References
+            last_sec = sections[-1]
+            last_is_refs = last_sec.get("heading", "").lower() in ["references", "bibliography", "works cited", "reference list"]
+            
+            middle_end = total_secs - 1 if last_is_refs else total_secs
+            middle_indices = list(range(1, middle_end))
+            
+            # 2. Parallel execution for middle/body sections with Semaphore(2)
+            sem = asyncio.Semaphore(2)
+            async def run_sem(idx):
+                async with sem:
+                    await generate_single_chunk(idx, sections[idx])
+            
+            if middle_indices:
+                await asyncio.gather(*[run_sem(i) for i in middle_indices])
+            
+            # 3. Generate References section last with preceding sections for accurate citations
+            if last_is_refs:
+                preceding_text = "\n\n".join([f"# {results[i][0]}\n{results[i][1]}" for i in range(total_secs - 1) if i in results])
+                await generate_single_chunk(total_secs - 1, last_sec, preceding_citations_hint=preceding_text)
+
         # ---------------------------------------------------------
-        # PHASE 3: Humanize the Stitched Document
+        # PHASE 3: Assemble Document (Double-Humanizer Eliminated)
         # ---------------------------------------------------------
-        # Note: Depending on total length, humanizing a massive string might hit token limits.
-        # But for now we pass the stitched result to the humanizer as one block.
-        final_text = await self.humanize_text(full_academic_text)
-        
-        return final_text
+        full_academic_text = ""
+        for i in range(total_secs):
+            if i in results:
+                h, c = results[i]
+                full_academic_text += f"\n\n# {h}\n\n{c}"
+
+        # Raw document returned directly; /stream-refine handles humanizing on client request
+        return full_academic_text.strip()
 
     async def chat_with_memory(self, current_summary: str, history: list, new_message: str) -> dict:
         """
@@ -999,14 +1060,13 @@ class AIService:
             headers = {"X-API-KEY": serper_api_key, "Content-Type": "application/json"}
             payload = {"q": search_query, "num": count}
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://google.serper.dev/search",
-                    headers=headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as resp:
-                    data = await resp.json()
+            client = await self.get_http_client()
+            resp = await client.post(
+                "https://google.serper.dev/search",
+                headers=headers,
+                json=payload
+            )
+            data = resp.json()
 
             organic = data.get("organic", [])
             if organic:
@@ -1029,7 +1089,6 @@ class AIService:
         Performs live web research using Serper.dev API.
         Falls back to LLM internal knowledge if no API key is configured.
         """
-        import aiohttp
         import json
 
         serper_api_key = getattr(settings, 'SERPER_API_KEY', None)
@@ -1041,14 +1100,13 @@ class AIService:
                 headers = {"X-API-KEY": serper_api_key, "Content-Type": "application/json"}
                 payload = {"q": search_query, "num": 5}
 
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        "https://google.serper.dev/search",
-                        headers=headers,
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=15)
-                    ) as resp:
-                        data = await resp.json()
+                client = await self.get_http_client()
+                resp = await client.post(
+                    "https://google.serper.dev/search",
+                    headers=headers,
+                    json=payload
+                )
+                data = resp.json()
 
                 organic = data.get("organic", [])
                 if organic:

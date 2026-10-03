@@ -153,9 +153,39 @@ class GradingService:
         tasks = [self.evaluate_criterion(c, request.assignment_text, request.strictness) for c in rubric.criteria]
         criterion_results = await asyncio.gather(*tasks)
         
-        # 3. Rule-Based Validation Layer
+        # 3. Rule-Based Validation Layer (Citation Quality & Density)
+        import re
         word_count = len(request.assignment_text.split())
-        citation_count = request.assignment_text.count("(") + request.assignment_text.count("[") # Rough heuristic
+        
+        # Regex for Harvard/APA in-text: (Smith, 2021) or (Smith et al., 2023)
+        author_year_citations = re.findall(r'\(([A-Z][a-zA-Z\s\.,&]+(?:,\s*|\s+)(\d{4}[a-z]?))\)', request.assignment_text)
+        # Regex for IEEE style: [1], [2-4]
+        ieee_citations = re.findall(r'\[(\d+)\]', request.assignment_text)
+        
+        detected_citations = len(author_year_citations) + len(ieee_citations)
+        citation_count = max(detected_citations, request.assignment_text.count("(") + request.assignment_text.count("["))
+        
+        # Citation recency and density metrics
+        current_year = 2026
+        years = [int(m[1][:4]) for m in author_year_citations if m[1][:4].isdigit()]
+        recent_years = [y for y in years if y >= (current_year - 5)]
+        recency_ratio = round(len(recent_years) / len(years), 2) if years else 0.5
+        density_per_1000 = round((citation_count / max(1, word_count)) * 1000, 1)
+        citation_health = "Excellent" if density_per_1000 >= 10 and recency_ratio >= 0.5 else ("Good" if density_per_1000 >= 5 else "Needs Improvement")
+        
+        citation_quality_metrics = {
+            "total_citations": citation_count,
+            "density_per_1000_words": density_per_1000,
+            "recent_sources_ratio": recency_ratio,
+            "citation_health": citation_health
+        }
+
+        # 3b. Structured Markdown Rubric Table
+        rubric_table_rows = ["| Criterion | Weight | Score | Assessment |", "| :--- | :--- | :--- | :--- |"]
+        for cr in criterion_results:
+            pct = round((cr.score / cr.max_score) * 100, 1) if cr.max_score > 0 else 0
+            rubric_table_rows.append(f"| {cr.criterion_name} | {cr.max_score}% | {cr.score:.1f}/{cr.max_score:.1f} | {pct}% |")
+        rubric_table_markdown = "\n".join(rubric_table_rows)
         
         # 4. Strictness Bias Logic (Layer 3)
         raw_total_score = sum(r.score for r in criterion_results)
@@ -171,25 +201,34 @@ class GradingService:
         # 5. Grade Classification
         classification = self.calculate_grade_classification(final_score, request.country)
         
-        # 6. Generate Overall Comments & Improvements
+        # 6. Generate Overall Comments, Improvements & Grade Gap Analysis
         summary_prompt = f"""
-        You are the Head Examiner. Provide a final summary for this assignment evaluation.
+        You are the Head Academic Examiner evaluating an assignment according to {request.country} university standards.
         
         STATS:
-        - Score: {final_score}/100
+        - Score: {final_score:.1f}/100
         - Classification: {classification}
         - Word Count: {word_count}
+        - Citation Health: {citation_health} (Density: {density_per_1000}/1k words, Recent Ratio: {int(recency_ratio*100)}%)
+        
+        CRITERIA SCORES:
+        {json.dumps([r.dict() for r in criterion_results])}
+
+        TASK:
+        1. Write professional examiner comments explaining why this grade was awarded.
+        2. Provide 3-5 high-impact, actionable improvement suggestions.
+        3. Provide a 'Grade Gap Analysis': For each criterion where marks were dropped, explain what precise changes are required to elevate the work to the next higher grade classification band.
         
         OUTPUT FORMAT (STRICT JSON):
         {{
             "examiner_comments": "A paragraph of professionally formatted summary comments...",
-            "improvement_suggestions": ["Actionable step 1", "Actionable step 2", "Actionable step 3"]
+            "improvement_suggestions": ["Actionable step 1", "Actionable step 2", "Actionable step 3"],
+            "grade_gap_analysis": ["To reach the next grade band in [Criterion]: [Specific edit required]"]
         }}
         """
         
         try:
-            summary_prompt_full = f"{summary_prompt}\n\nCriterion Results summary: {json.dumps([r.dict() for r in criterion_results])}"
-            summary_res = await self.ai_service.generate_content(summary_prompt_full)
+            summary_res = await self.ai_service.generate_content(summary_prompt)
             
             json_str = self.ai_service.extract_json_from_text(summary_res)
             summary_data = json.loads(json_str)
@@ -201,9 +240,12 @@ class GradingService:
                 criterion_results=criterion_results,
                 examiner_comments=summary_data.get('examiner_comments', 'No comments provided.'),
                 improvement_suggestions=summary_data.get('improvement_suggestions', []),
+                grade_gap_analysis=summary_data.get('grade_gap_analysis', []),
+                rubric_table_markdown=rubric_table_markdown,
                 word_count=word_count,
                 referencing_style_detected="Detected from content",
                 citation_count=citation_count,
+                citation_quality_metrics=citation_quality_metrics,
                 assignment_id=request.assignment_id,
                 country=request.country,
                 strictness=request.strictness,
@@ -222,10 +264,12 @@ class GradingService:
                 criterion_results=criterion_results,
                 examiner_comments="Manual review recommended. Technical error in summary generation.",
                 improvement_suggestions=[],
+                grade_gap_analysis=[],
+                rubric_table_markdown=rubric_table_markdown,
                 word_count=word_count,
                 referencing_style_detected="N/A",
                 citation_count=citation_count,
-                # Fallback for new fields
+                citation_quality_metrics=citation_quality_metrics,
                 assignment_id=request.assignment_id,
                 country=request.country,
                 strictness=request.strictness,
