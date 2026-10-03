@@ -91,7 +91,20 @@ async def extract_text_from_file(file: UploadFile) -> str:
                 raise HTTPException(status_code=500, detail="DOCX support not installed")
             doc = Document(file_stream)
             for para in doc.paragraphs:
-                text += para.text + "\n"
+                if para.text.strip():
+                    text += para.text + "\n"
+            for table in doc.tables:
+                for row in table.rows:
+                    row_texts = []
+                    seen_cells = set()
+                    for cell in row.cells:
+                        if cell not in seen_cells:
+                            seen_cells.add(cell)
+                            c_text = cell.text.strip()
+                            if c_text:
+                                row_texts.append(c_text)
+                    if row_texts:
+                        text += " | ".join(row_texts) + "\n"
 
         elif filename.endswith(".pptx"):
             if not Presentation:

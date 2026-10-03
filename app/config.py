@@ -77,6 +77,8 @@ class TierAllocation:
         }
     }
 
+MARKING_CLASSIFICATIONS = TierAllocation.MARKING_CLASSIFICATIONS
+
 class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_KEY: str
