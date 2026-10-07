@@ -103,7 +103,7 @@ class AIService:
             
         return json_str
 
-    async def generate_content(self, prompt: str | list, system_instruction: str = None, timeout: int = 120) -> str:
+    async def generate_content(self, prompt: str | list, system_instruction: str = None, timeout: int = 120, **kwargs) -> str:
         """
         Generates content using the internal AI model with timeout protection.
         Returns ONLY the text content.
@@ -112,6 +112,7 @@ class AIService:
             prompt: The user prompt or list of parts (e.g. text + files)
             system_instruction: Optional system-level instructions
             timeout: Maximum time to wait for response (default 120s)
+            kwargs: Passed directly to generate_content
         """
         import asyncio
         
@@ -143,7 +144,8 @@ class AIService:
                         asyncio.to_thread(
                             self.model.generate_content, 
                             full_prompt,
-                            request_options={"timeout": timeout}
+                            request_options={"timeout": timeout},
+                            **kwargs
                         ),
                         timeout=timeout + 5  # Give SDK a bit more room than our local timeout
                     )
@@ -211,7 +213,11 @@ class AIService:
             if len(words) <= 2200:
                 # Small enough for a single pass
                 prompt = f"Original Text to Refine:\n\n{text}"
-                return await self.generate_content(prompt, system_instruction=system_instruction)
+                return await self.generate_content(
+                    prompt, 
+                    system_instruction=system_instruction,
+                    generation_config=genai.GenerationConfig(temperature=1.05, top_p=0.98)
+                )
 
             # 3. Large Document Path: Chunking
             logger.info(f"Large document detected ({len(words)} words). Starting chunked refinement.")
@@ -307,7 +313,14 @@ class AIService:
 
             def _sync_stream_chunk(prompt_text=prompt):
                 try:
-                    response = self.model.generate_content(prompt_text, stream=True)
+                    response = self.model.generate_content(
+                        prompt_text, 
+                        stream=True,
+                        generation_config=genai.GenerationConfig(
+                            temperature=1.05,
+                            top_p=0.98
+                        )
+                    )
                     for stream_chunk in response:
                         try:
                             txt = stream_chunk.text

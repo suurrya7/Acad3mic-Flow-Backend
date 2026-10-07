@@ -322,11 +322,18 @@ async def stream_refined_content(
         try:
             supabase.table("assignments").update({"progress_stage": "refining"}).eq("id", str(assignment_id)).execute()
 
+            refined_text_accumulator = []
             async for tok in ai_service.refine_content_stream(raw_text):
+                refined_text_accumulator.append(tok)
                 safe = tok.replace("\n", "\\n")
                 yield f"data: {safe}\n\n"
 
-            supabase.table("assignments").update({"progress_stage": "done"}).eq("id", str(assignment_id)).execute()
+            final_refined_text = "".join(refined_text_accumulator)
+            supabase.table("assignments").update({
+                "progress_stage": "done",
+                "output_text": final_refined_text
+            }).eq("id", str(assignment_id)).execute()
+            
             yield "data: [DONE]\n\n"
 
         except Exception as e:
