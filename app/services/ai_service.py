@@ -517,9 +517,12 @@ class AIService:
                 json_str = json_str.split("```")[1].split("```")[0].strip()
             
             outline_data = json.loads(json_str)
+            outline_data = json.loads(json_str)
             sections = outline_data.get("sections", [])
+            if not sections:
+                raise ValueError("AI returned empty sections array")
             
-        except Exception as e:
+        except Exception as e: Exception as e:
             logger.error(f"Outline generation failed: {str(e)}")
             # Fallback Outline (always includes References)
             sections = [
@@ -701,8 +704,12 @@ class AIService:
                 h, c = results[i]
                 full_academic_text += f"\n\n# {h}\n\n{c}"
 
+        full_academic_text = full_academic_text.strip()
+        if not full_academic_text:
+            full_academic_text = "[Generation failed entirely due to technical errors or empty outline.]"
+
         # Raw document returned directly; /stream-refine handles humanizing on client request
-        return full_academic_text.strip()
+        return full_academic_text
 
     async def chat_with_memory(self, current_summary: str, history: list, new_message: str) -> dict:
         """
