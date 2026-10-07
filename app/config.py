@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     SUPABASE_JWT_SECRET: str
     
     GEMINI_API_KEY: str
-    GEMINI_MODEL_NAME: str = "models/gemini-3.5-flash"
+    GEMINI_MODEL_NAME: str = "models/gemini-3.5-flash-lite"
     
     # Optional: Serper.dev API key for live scholarly research
     # If not set, falls back to LLM internal knowledge
