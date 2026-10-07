@@ -668,21 +668,51 @@ async def list_assignments(current_user: dict = Depends(get_current_user)):
     res = supabase.table("assignments").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
     return res.data
 
+async def process_grading_task(report_id: str, user_id: str, request_data: dict):
+    from app.services.grading_service import get_grading_service
+    from app.services.user_service import user_service
+    import logging
+    
+    supabase = get_supabase_admin()
+    logger = logging.getLogger("grading")
+    
+    try:
+        from app.models.grading import GradingRequest
+        req = GradingRequest(**request_data)
+        
+        grading_service = get_grading_service()
+        report = await grading_service.generate_full_report(req)
+        
+        from fastapi.encoders import jsonable_encoder
+        report_data = jsonable_encoder(report, exclude_none=True)
+        report_data["user_id"] = user_id
+        report_data["status"] = "completed"
+        
+        supabase.table("grading_reports").update(report_data).eq("id", report_id).execute()
+        user_service.deduct_grading_check(user_id)
+        
+    except Exception as e:
+        logger.error(f"Grading task failed for {report_id}: {str(e)}")
+        supabase.table("grading_reports").update({
+            "status": "failed",
+            "error_message": str(e)
+        }).eq("id", report_id).execute()
+
+
 @router.post("/grade", response_model=GradingResponse)
 @limiter.limit("5/minute")
 async def grade_assignment(
     request_data: GradingRequest,
+    background_tasks: BackgroundTasks,
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Evaluates an assignment and generates a professional grading report.
-    """
     supabase = get_supabase_admin()
     user_id = current_user["id"]
+    from app.services.user_service import user_service
     
-    # 0. Anti-Spam / Concurrency Check: Prevent multiple concurrent generations
-    active = supabase.table("assignments").select("id, created_at").eq("user_id", user_id).eq("status", "processing").limit(1).execute()
+    # 0. Anti-Spam / Concurrency Check for Grading
+    active = supabase.table("grading_reports").select("id, created_at").eq("user_id", user_id).eq("status", "processing").limit(1).execute()
     if active.data:
         import datetime
         from dateutil.parser import parse
@@ -693,35 +723,30 @@ async def grade_assignment(
         if created_at_str:
             try:
                 created_at = parse(created_at_str)
-                # Ensure timezone aware
                 if created_at.tzinfo is None:
                     created_at = pytz.utc.localize(created_at)
                 now = datetime.datetime.now(pytz.utc)
-                if (now - created_at).total_seconds() > 600: # 10 minutes
+                if (now - created_at).total_seconds() > 600:
                     is_stale = True
             except:
                 pass
                 
         if is_stale:
-            # Mark the stale assignment as failed to unblock the user
-            supabase.table("assignments").update({
+            supabase.table("grading_reports").update({
                 "status": "failed", 
-                "error_message": "Generation timed out or server restarted."
+                "error_message": "Grading timed out or server restarted."
             }).eq("id", active.data[0]["id"]).execute()
         else:
-            raise HTTPException(status_code=429, detail="You already have an assignment in progress. Please wait for it to complete.")
-    grading_service = get_grading_service()
+            raise HTTPException(status_code=429, detail="You already have a grading task in progress. Please wait for it to complete.")
     
     # 1. Check Balance
     if not user_service.check_grading_balance(user_id):
         raise HTTPException(status_code=402, detail="Insufficient grading checks remaining.")
     
     try:
-        # 2. Extract Document Content based on categories
-        combined_brief_text = request_data.brief_text
-        combined_assignment_text = request_data.assignment_text
+        combined_brief_text = request_data.brief_text or ""
+        combined_assignment_text = request_data.assignment_text or ""
         
-        # Collect all unique IDs to fetch in one go
         all_ids_set = set()
         if request_data.document_ids:
             all_ids_set.update([str(did) for did in request_data.document_ids])
@@ -734,47 +759,48 @@ async def grade_assignment(
             docs_res = supabase.table("documents").select("id, content_extracted").in_("id", list(all_ids_set)).eq("user_id", user_id).execute()
             doc_map = {doc["id"]: doc.get("content_extracted", "") for doc in docs_res.data}
             
-            # Append to brief text (legacy document_ids go here to be safe, plus specific brief docs)
             brief_ids = set([str(did) for did in (request_data.document_ids or [])] + [str(did) for did in (request_data.brief_document_ids or [])])
             for did in brief_ids:
                 if doc_map.get(did):
                     combined_brief_text += "\n\n[Attached Brief Document]:\n" + doc_map[did]
                     
-            # Append to assignment text
             assignment_ids = set([str(did) for did in (request_data.assignment_document_ids or [])])
             for did in assignment_ids:
                 if doc_map.get(did):
                     combined_assignment_text += "\n\n[Attached Submission Document]:\n" + doc_map[did]
                     
-        # Update request with combined text
         request_data.brief_text = combined_brief_text
         request_data.assignment_text = combined_assignment_text
 
-
-        # 3. Generate Report (This is a complex AI task, can be long-running)
-        # Note: For production, this could be a background task with SSE/Polling
-        # For now, we do it in-line (300s timeout in AI service handles the duration)
-        report = await grading_service.generate_full_report(request_data)
+        import uuid
+        pending_report = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "title": request_data.title or "Grading Report",
+            "status": "processing"
+        }
         
-        # 4. Save to Database
-        # Using exclude_none=True to avoid sending 'id: null' which violates NOT NULL constraints
-        # when the database is expected to generate the UUID.
-        from fastapi.encoders import jsonable_encoder
-        report_data = jsonable_encoder(report, exclude_none=True)
-        report_data["user_id"] = user_id
-        
-        insert_res = supabase.table("grading_reports").insert(report_data).execute()
+        insert_res = supabase.table("grading_reports").insert(pending_report).execute()
         if not insert_res.data:
-             logger.error("Failed to save grading report to Supabase")
+            raise HTTPException(status_code=500, detail="Failed to initialize grading task")
+            
+        report_id = insert_res.data[0]["id"]
         
-        # 5. Deduct Balance
-        user_service.deduct_grading_check(user_id)
+        from fastapi.encoders import jsonable_encoder
+        background_tasks.add_task(
+            process_grading_task,
+            report_id,
+            user_id,
+            jsonable_encoder(request_data)
+        )
         
-        return {"report": report, "status": "completed"}
+        return {"report": insert_res.data[0], "status": "processing"}
         
     except Exception as e:
-        logger.error(f"Grading failed: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Grading failed: {str(e)}")
+        import logging
+        logger = logging.getLogger("assignments")
+        logger.error(f"Grading initialization failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Grading initialization failed: {str(e)}")
 
 @router.get("/grade/history")
 async def get_grading_history(request: Request, current_user: dict = Depends(get_current_user)):

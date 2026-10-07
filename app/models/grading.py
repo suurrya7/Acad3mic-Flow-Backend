@@ -35,7 +35,7 @@ class GradingReport(BaseModel):
     id: Optional[UUID] = None
     user_id: Optional[UUID] = None
     assignment_id: Optional[UUID] = None
-    title: str
+    title: Optional[str] = None
     
     # Input data reflected in report
     country: Optional[str] = None
@@ -46,11 +46,11 @@ class GradingReport(BaseModel):
     brief_document_ids: Optional[List[UUID]] = []
     assignment_document_ids: Optional[List[UUID]] = []
     
-    overall_score: float
-    grade_classification: str
-    criterion_results: List[GradingCriterionResult]
-    examiner_comments: str
-    improvement_suggestions: List[str]
+    overall_score: Optional[float] = None
+    grade_classification: Optional[str] = None
+    criterion_results: Optional[List[GradingCriterionResult]] = None
+    examiner_comments: Optional[str] = None
+    improvement_suggestions: Optional[List[str]] = None
     grade_gap_analysis: Optional[List[str]] = None
     rubric_table_markdown: Optional[str] = None
     
