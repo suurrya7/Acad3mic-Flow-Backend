@@ -3,7 +3,7 @@ from fastapi.responses import Response, StreamingResponse
 import logging
 import asyncio
 import json
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_current_user_claims
 from app.services.ai_service import get_ai_service
 from app.services.user_service import user_service
 from app.db.supabase import get_supabase_admin
@@ -284,7 +284,7 @@ async def stream_refined_content(
     )
 
 @router.get("/{assignment_id}", response_model=AssignmentResponse)
-async def get_assignment(assignment_id: UUID, current_user: dict = Depends(get_current_user)):
+async def get_assignment(assignment_id: UUID, current_user: dict = Depends(get_current_user_claims)):
     supabase = get_supabase_admin()
     user_id = current_user["id"]
     
@@ -304,7 +304,7 @@ async def get_assignment(assignment_id: UUID, current_user: dict = Depends(get_c
     return data
 
 @router.get("/{assignment_id}/chunks", response_model=list[AssignmentChunkResponse])
-async def get_assignment_chunks(assignment_id: UUID, current_user: dict = Depends(get_current_user)):
+async def get_assignment_chunks(assignment_id: UUID, current_user: dict = Depends(get_current_user_claims)):
     """
     Returns all saved assignment chunks for live preview or resumption.
     """
@@ -328,7 +328,7 @@ async def get_assignment_chunks(assignment_id: UUID, current_user: dict = Depend
 async def stream_assignment_progress(
     assignment_id: UUID,
     request: Request,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user_claims)
 ):
     """
     SSE endpoint that streams real-time assignment progress and chunk events.

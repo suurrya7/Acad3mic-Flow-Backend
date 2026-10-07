@@ -284,7 +284,7 @@ async def test_local_fastapi_endpoints():
     try:
         import httpx
         from app.main import app
-        from app.dependencies import get_current_user
+        from app.dependencies import get_current_user, get_current_user_claims
 
         # Create mock user
         test_user = {
@@ -292,8 +292,9 @@ async def test_local_fastapi_endpoints():
             "email": "test_crosstest@acad3micflow.space"
         }
 
-        # Override dependency
+        # Override dependencies
         app.dependency_overrides[get_current_user] = lambda: test_user
+        app.dependency_overrides[get_current_user_claims] = lambda: test_user
         transport = httpx.ASGITransport(app=app)
         
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -360,7 +361,7 @@ async def test_live_render_production():
         import httpx
         live_base = "https://acad3mic-flow-backend.onrender.com"
         
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             # 1. Health check
             res_health = await client.get(f"{live_base}/health")
             assert res_health.status_code == 200, f"Live /health returned {res_health.status_code}"

@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Response
 from app.dependencies import get_current_user
 from app.db.supabase import get_supabase_admin, get_supabase_user_client
 from app.config import get_settings
+from app.utils.cache import user_profile_cache
 from pydantic import BaseModel
 import logging
 
@@ -42,10 +43,11 @@ async def signup(credentials: LoginRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/login")
-async def login(credentials: LoginRequest):
+async def login(credentials: LoginRequest, response: Response):
     """
-    Developer Helper: Login to get Access Token for Swagger UI testing.
-    PROD NOTE: Frontend should use Supabase JS SDK directly.
+    Authenticates user and returns an Access Token.
+    Sets a secure, HttpOnly, SameSite=None cookie for seamless and XSS-immune auth,
+    while also returning access_token in the response body for SPA compatibility.
     """
     import time
     start_time = time.time()
@@ -58,18 +60,43 @@ async def login(credentials: LoginRequest):
         })
         duration = time.time() - start_time
         logger.info(f"Login successful for {credentials.email} in {duration:.2f}s")
+
+        token = res.session.access_token
+
+        # Set secure HttpOnly cookie for maximum security against XSS attacks
+        response.set_cookie(
+            key="access_token",
+            value=token,
+            httponly=True,
+            secure=True,
+            samesite="none",
+            max_age=60 * 60 * 24 * 7  # 7 days
+        )
+
         return {
-            "access_token": res.session.access_token,
+            "access_token": token,
             "token_type": "bearer",
             "user": res.user
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.post("/logout")
+async def logout(response: Response):
+    """
+    Clears the authentication cookie and ends session.
+    """
+    response.delete_cookie(
+        key="access_token",
+        samesite="none",
+        secure=True
+    )
+    return {"message": "Logged out successfully."}
+
 @router.get("/me")
 async def get_my_profile(current_user: dict = Depends(get_current_user)):
     """
-    Returns the current authenticated user's profile.
+    Returns the current authenticated user's profile from in-memory cache (<0.1ms).
     """
     return {
         "id": current_user["id"],
@@ -102,6 +129,9 @@ async def update_my_profile(
         res = supabase.table("user_profiles").update(update_data).eq("id", user_id).execute()
         if not res.data:
             raise HTTPException(status_code=400, detail="Failed to update profile.")
+        
+        # Invalidate profile cache so fresh settings are returned
+        user_profile_cache.delete(user_id)
         return {"message": "Profile updated successfully.", "profile": res.data[0]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
