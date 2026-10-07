@@ -184,6 +184,36 @@ async def submit_assignment(
     supabase = get_supabase_admin()
     user_id = current_user["id"]
     
+    # 0. Anti-Spam / Concurrency Check: Prevent multiple concurrent generations
+    active = supabase.table("assignments").select("id, created_at").eq("user_id", user_id).eq("status", "processing").limit(1).execute()
+    if active.data:
+        import datetime
+        from dateutil.parser import parse
+        import pytz
+        
+        created_at_str = active.data[0].get("created_at")
+        is_stale = False
+        if created_at_str:
+            try:
+                created_at = parse(created_at_str)
+                # Ensure timezone aware
+                if created_at.tzinfo is None:
+                    created_at = pytz.utc.localize(created_at)
+                now = datetime.datetime.now(pytz.utc)
+                if (now - created_at).total_seconds() > 600: # 10 minutes
+                    is_stale = True
+            except:
+                pass
+                
+        if is_stale:
+            # Mark the stale assignment as failed to unblock the user
+            supabase.table("assignments").update({
+                "status": "failed", 
+                "error_message": "Generation timed out or server restarted."
+            }).eq("id", active.data[0]["id"]).execute()
+        else:
+            raise HTTPException(status_code=429, detail="You already have an assignment in progress. Please wait for it to complete.")
+    
     # 1. Check Balance
     from app.services.user_service import user_service
     if not user_service.check_balance(user_id, required_words=500):
@@ -245,6 +275,36 @@ async def stream_refined_content(
 
     supabase = get_supabase_admin()
     user_id = current_user["id"]
+    
+    # 0. Anti-Spam / Concurrency Check: Prevent multiple concurrent generations
+    active = supabase.table("assignments").select("id, created_at").eq("user_id", user_id).eq("status", "processing").limit(1).execute()
+    if active.data:
+        import datetime
+        from dateutil.parser import parse
+        import pytz
+        
+        created_at_str = active.data[0].get("created_at")
+        is_stale = False
+        if created_at_str:
+            try:
+                created_at = parse(created_at_str)
+                # Ensure timezone aware
+                if created_at.tzinfo is None:
+                    created_at = pytz.utc.localize(created_at)
+                now = datetime.datetime.now(pytz.utc)
+                if (now - created_at).total_seconds() > 600: # 10 minutes
+                    is_stale = True
+            except:
+                pass
+                
+        if is_stale:
+            # Mark the stale assignment as failed to unblock the user
+            supabase.table("assignments").update({
+                "status": "failed", 
+                "error_message": "Generation timed out or server restarted."
+            }).eq("id", active.data[0]["id"]).execute()
+        else:
+            raise HTTPException(status_code=429, detail="You already have an assignment in progress. Please wait for it to complete.")
 
     # Fetch the completed assignment output
     res = supabase.table("assignments").select("output_text, status").eq("id", str(assignment_id)).eq("user_id", user_id).single().execute()
@@ -288,6 +348,36 @@ async def get_assignment(assignment_id: UUID, current_user: dict = Depends(get_c
     supabase = get_supabase_admin()
     user_id = current_user["id"]
     
+    # 0. Anti-Spam / Concurrency Check: Prevent multiple concurrent generations
+    active = supabase.table("assignments").select("id, created_at").eq("user_id", user_id).eq("status", "processing").limit(1).execute()
+    if active.data:
+        import datetime
+        from dateutil.parser import parse
+        import pytz
+        
+        created_at_str = active.data[0].get("created_at")
+        is_stale = False
+        if created_at_str:
+            try:
+                created_at = parse(created_at_str)
+                # Ensure timezone aware
+                if created_at.tzinfo is None:
+                    created_at = pytz.utc.localize(created_at)
+                now = datetime.datetime.now(pytz.utc)
+                if (now - created_at).total_seconds() > 600: # 10 minutes
+                    is_stale = True
+            except:
+                pass
+                
+        if is_stale:
+            # Mark the stale assignment as failed to unblock the user
+            supabase.table("assignments").update({
+                "status": "failed", 
+                "error_message": "Generation timed out or server restarted."
+            }).eq("id", active.data[0]["id"]).execute()
+        else:
+            raise HTTPException(status_code=429, detail="You already have an assignment in progress. Please wait for it to complete.")
+    
     res = supabase.table("assignments").select("*").eq("id", str(assignment_id)).eq("user_id", user_id).single().execute()
     
     if not res.data:
@@ -310,6 +400,36 @@ async def get_assignment_chunks(assignment_id: UUID, current_user: dict = Depend
     """
     supabase = get_supabase_admin()
     user_id = current_user["id"]
+    
+    # 0. Anti-Spam / Concurrency Check: Prevent multiple concurrent generations
+    active = supabase.table("assignments").select("id, created_at").eq("user_id", user_id).eq("status", "processing").limit(1).execute()
+    if active.data:
+        import datetime
+        from dateutil.parser import parse
+        import pytz
+        
+        created_at_str = active.data[0].get("created_at")
+        is_stale = False
+        if created_at_str:
+            try:
+                created_at = parse(created_at_str)
+                # Ensure timezone aware
+                if created_at.tzinfo is None:
+                    created_at = pytz.utc.localize(created_at)
+                now = datetime.datetime.now(pytz.utc)
+                if (now - created_at).total_seconds() > 600: # 10 minutes
+                    is_stale = True
+            except:
+                pass
+                
+        if is_stale:
+            # Mark the stale assignment as failed to unblock the user
+            supabase.table("assignments").update({
+                "status": "failed", 
+                "error_message": "Generation timed out or server restarted."
+            }).eq("id", active.data[0]["id"]).execute()
+        else:
+            raise HTTPException(status_code=429, detail="You already have an assignment in progress. Please wait for it to complete.")
 
     # Verify ownership
     res = supabase.table("assignments").select("id").eq("id", str(assignment_id)).eq("user_id", user_id).single().execute()
@@ -336,6 +456,36 @@ async def stream_assignment_progress(
     """
     supabase = get_supabase_admin()
     user_id = current_user["id"]
+    
+    # 0. Anti-Spam / Concurrency Check: Prevent multiple concurrent generations
+    active = supabase.table("assignments").select("id, created_at").eq("user_id", user_id).eq("status", "processing").limit(1).execute()
+    if active.data:
+        import datetime
+        from dateutil.parser import parse
+        import pytz
+        
+        created_at_str = active.data[0].get("created_at")
+        is_stale = False
+        if created_at_str:
+            try:
+                created_at = parse(created_at_str)
+                # Ensure timezone aware
+                if created_at.tzinfo is None:
+                    created_at = pytz.utc.localize(created_at)
+                now = datetime.datetime.now(pytz.utc)
+                if (now - created_at).total_seconds() > 600: # 10 minutes
+                    is_stale = True
+            except:
+                pass
+                
+        if is_stale:
+            # Mark the stale assignment as failed to unblock the user
+            supabase.table("assignments").update({
+                "status": "failed", 
+                "error_message": "Generation timed out or server restarted."
+            }).eq("id", active.data[0]["id"]).execute()
+        else:
+            raise HTTPException(status_code=429, detail="You already have an assignment in progress. Please wait for it to complete.")
 
     # Verify ownership
     res = supabase.table("assignments").select("id, status, progress_stage").eq("id", str(assignment_id)).eq("user_id", user_id).single().execute()
@@ -417,6 +567,36 @@ async def export_assignment_docx(
     """
     supabase = get_supabase_admin()
     user_id = current_user["id"]
+    
+    # 0. Anti-Spam / Concurrency Check: Prevent multiple concurrent generations
+    active = supabase.table("assignments").select("id, created_at").eq("user_id", user_id).eq("status", "processing").limit(1).execute()
+    if active.data:
+        import datetime
+        from dateutil.parser import parse
+        import pytz
+        
+        created_at_str = active.data[0].get("created_at")
+        is_stale = False
+        if created_at_str:
+            try:
+                created_at = parse(created_at_str)
+                # Ensure timezone aware
+                if created_at.tzinfo is None:
+                    created_at = pytz.utc.localize(created_at)
+                now = datetime.datetime.now(pytz.utc)
+                if (now - created_at).total_seconds() > 600: # 10 minutes
+                    is_stale = True
+            except:
+                pass
+                
+        if is_stale:
+            # Mark the stale assignment as failed to unblock the user
+            supabase.table("assignments").update({
+                "status": "failed", 
+                "error_message": "Generation timed out or server restarted."
+            }).eq("id", active.data[0]["id"]).execute()
+        else:
+            raise HTTPException(status_code=429, detail="You already have an assignment in progress. Please wait for it to complete.")
 
     res = supabase.table("assignments").select("title, output_text, status, created_at").eq("id", str(assignment_id)).eq("user_id", user_id).single().execute()
     if not res.data:
@@ -455,6 +635,36 @@ async def list_assignments(current_user: dict = Depends(get_current_user)):
     supabase = get_supabase_admin()
     user_id = current_user["id"]
     
+    # 0. Anti-Spam / Concurrency Check: Prevent multiple concurrent generations
+    active = supabase.table("assignments").select("id, created_at").eq("user_id", user_id).eq("status", "processing").limit(1).execute()
+    if active.data:
+        import datetime
+        from dateutil.parser import parse
+        import pytz
+        
+        created_at_str = active.data[0].get("created_at")
+        is_stale = False
+        if created_at_str:
+            try:
+                created_at = parse(created_at_str)
+                # Ensure timezone aware
+                if created_at.tzinfo is None:
+                    created_at = pytz.utc.localize(created_at)
+                now = datetime.datetime.now(pytz.utc)
+                if (now - created_at).total_seconds() > 600: # 10 minutes
+                    is_stale = True
+            except:
+                pass
+                
+        if is_stale:
+            # Mark the stale assignment as failed to unblock the user
+            supabase.table("assignments").update({
+                "status": "failed", 
+                "error_message": "Generation timed out or server restarted."
+            }).eq("id", active.data[0]["id"]).execute()
+        else:
+            raise HTTPException(status_code=429, detail="You already have an assignment in progress. Please wait for it to complete.")
+    
     res = supabase.table("assignments").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
     return res.data
 
@@ -470,6 +680,36 @@ async def grade_assignment(
     """
     supabase = get_supabase_admin()
     user_id = current_user["id"]
+    
+    # 0. Anti-Spam / Concurrency Check: Prevent multiple concurrent generations
+    active = supabase.table("assignments").select("id, created_at").eq("user_id", user_id).eq("status", "processing").limit(1).execute()
+    if active.data:
+        import datetime
+        from dateutil.parser import parse
+        import pytz
+        
+        created_at_str = active.data[0].get("created_at")
+        is_stale = False
+        if created_at_str:
+            try:
+                created_at = parse(created_at_str)
+                # Ensure timezone aware
+                if created_at.tzinfo is None:
+                    created_at = pytz.utc.localize(created_at)
+                now = datetime.datetime.now(pytz.utc)
+                if (now - created_at).total_seconds() > 600: # 10 minutes
+                    is_stale = True
+            except:
+                pass
+                
+        if is_stale:
+            # Mark the stale assignment as failed to unblock the user
+            supabase.table("assignments").update({
+                "status": "failed", 
+                "error_message": "Generation timed out or server restarted."
+            }).eq("id", active.data[0]["id"]).execute()
+        else:
+            raise HTTPException(status_code=429, detail="You already have an assignment in progress. Please wait for it to complete.")
     grading_service = get_grading_service()
     
     # 1. Check Balance
@@ -544,6 +784,36 @@ async def get_grading_history(request: Request, current_user: dict = Depends(get
     supabase = get_supabase_admin()
     user_id = current_user["id"]
     
+    # 0. Anti-Spam / Concurrency Check: Prevent multiple concurrent generations
+    active = supabase.table("assignments").select("id, created_at").eq("user_id", user_id).eq("status", "processing").limit(1).execute()
+    if active.data:
+        import datetime
+        from dateutil.parser import parse
+        import pytz
+        
+        created_at_str = active.data[0].get("created_at")
+        is_stale = False
+        if created_at_str:
+            try:
+                created_at = parse(created_at_str)
+                # Ensure timezone aware
+                if created_at.tzinfo is None:
+                    created_at = pytz.utc.localize(created_at)
+                now = datetime.datetime.now(pytz.utc)
+                if (now - created_at).total_seconds() > 600: # 10 minutes
+                    is_stale = True
+            except:
+                pass
+                
+        if is_stale:
+            # Mark the stale assignment as failed to unblock the user
+            supabase.table("assignments").update({
+                "status": "failed", 
+                "error_message": "Generation timed out or server restarted."
+            }).eq("id", active.data[0]["id"]).execute()
+        else:
+            raise HTTPException(status_code=429, detail="You already have an assignment in progress. Please wait for it to complete.")
+    
     res = supabase.table("grading_reports").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
     return res.data
 
@@ -551,6 +821,36 @@ async def get_grading_history(request: Request, current_user: dict = Depends(get
 async def get_grading_report(report_id: UUID, current_user: dict = Depends(get_current_user)):
     supabase = get_supabase_admin()
     user_id = current_user["id"]
+    
+    # 0. Anti-Spam / Concurrency Check: Prevent multiple concurrent generations
+    active = supabase.table("assignments").select("id, created_at").eq("user_id", user_id).eq("status", "processing").limit(1).execute()
+    if active.data:
+        import datetime
+        from dateutil.parser import parse
+        import pytz
+        
+        created_at_str = active.data[0].get("created_at")
+        is_stale = False
+        if created_at_str:
+            try:
+                created_at = parse(created_at_str)
+                # Ensure timezone aware
+                if created_at.tzinfo is None:
+                    created_at = pytz.utc.localize(created_at)
+                now = datetime.datetime.now(pytz.utc)
+                if (now - created_at).total_seconds() > 600: # 10 minutes
+                    is_stale = True
+            except:
+                pass
+                
+        if is_stale:
+            # Mark the stale assignment as failed to unblock the user
+            supabase.table("assignments").update({
+                "status": "failed", 
+                "error_message": "Generation timed out or server restarted."
+            }).eq("id", active.data[0]["id"]).execute()
+        else:
+            raise HTTPException(status_code=429, detail="You already have an assignment in progress. Please wait for it to complete.")
     
     res = supabase.table("grading_reports").select("*").eq("id", str(report_id)).eq("user_id", user_id).single().execute()
     if not res.data:
