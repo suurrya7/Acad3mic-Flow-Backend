@@ -522,7 +522,7 @@ class AIService:
             if not sections:
                 raise ValueError("AI returned empty sections array")
             
-        except Exception as e: Exception as e:
+        except Exception as e:
             logger.error(f"Outline generation failed: {str(e)}")
             # Fallback Outline (always includes References)
             sections = [
