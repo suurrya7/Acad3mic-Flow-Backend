@@ -2,7 +2,7 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.db.supabase import get_supabase_admin, get_supabase_user_client
 from app.config import get_settings
-from app.utils.cache import user_profile_cache
+from app.utils.cache import user_profile_cache, token_claims_cache
 from typing import Optional
 import logging
 
@@ -52,6 +52,11 @@ async def get_current_user_claims(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Fast Path: Check in-memory token claims cache
+    cached_claims = token_claims_cache.get(token)
+    if cached_claims:
+        return cached_claims
+
     try:
         payload = jwt.decode(
             token,
@@ -65,28 +70,46 @@ async def get_current_user_claims(
         if not user_id:
             raise JWTError("Token missing subject (user_id)")
 
-        return {
+        claims = {
             "id": user_id,
             "email": user_email,
             "token": token
         }
+        token_claims_cache.set(token, claims, ttl=300)
+        return claims
 
     except JWTError as jwt_err:
         logger.warning(f"Local JWT verification failed: {str(jwt_err)}. Falling back to remote check...")
-        user_client = get_supabase_user_client(token)
-        user_response = user_client.auth.get_user(token)
+        
+        try:
+            user_client = get_supabase_user_client(token)
+            # Use jwt keyword for compatibility with supabase-py 2.x
+            user_response = user_client.auth.get_user(jwt=token)
 
-        if not user_response or not user_response.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return {
-            "id": user_response.user.id,
-            "email": user_response.user.email,
-            "token": token
-        }
+            if not user_response or not user_response.user:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authentication credentials",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            
+            claims = {
+                "id": user_response.user.id,
+                "email": user_response.user.email,
+                "token": token
+            }
+            token_claims_cache.set(token, claims, ttl=300)
+            return claims
+            
+        except Exception as api_err:
+            error_str = str(api_err).lower()
+            if "429" in error_str or "rate limit" in error_str:
+                logger.error("Supabase Auth API Rate Limited (429).")
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Auth rate limit exceeded. Please try again in a moment.",
+                )
+            raise
 
 async def get_current_user(
     request: Request,
@@ -131,7 +154,7 @@ async def get_current_user(
 
     except Exception as e:
         if isinstance(e, HTTPException): raise e
-        logger.error(f"Auth verification failed: {str(e)}")
+        logger.error(f"Profile fetch failed: {str(e)}")
 
         if settings.ENV == "production":
             raise HTTPException(

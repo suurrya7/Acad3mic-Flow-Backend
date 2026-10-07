@@ -59,3 +59,6 @@ class TTLCache:
 
 # Global singleton cache for user profiles (60-second TTL)
 user_profile_cache = TTLCache(default_ttl=60, max_size=5000)
+
+# Global singleton cache for token claims to prevent rate-limiting on remote fallback
+token_claims_cache = TTLCache(default_ttl=300, max_size=10000)
